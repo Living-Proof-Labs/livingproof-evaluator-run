@@ -1,0 +1,32 @@
+site_name: LivingProof Run Evaluator
+site_url: https://docs.livingprooflabs.com/livingproof-evaluator-run/
+repo_url: https://github.com/Living-Proof-Labs/livingproof-evaluator-run
+repo_name: Source
+edit_uri: edit/main/docs/
+docs_dir: .build/docs
+site_dir: site
+nav:
+  - Documentation home: https://docs.livingprooflabs.com/
+  - Start here: index.md
+  - Verification: verification.md
+  - Contribute: contribute.md
+  - Version and source: version.md
+theme:
+  name: material
+  palette:
+    - media: '(prefers-color-scheme)'
+      primary: custom
+      accent: custom
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: custom
+      accent: custom
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: custom
+      accent: custom
+extra_css:
+  - assets/brand.css
+markdown_extensions:
+  - toc:
+      permalink: true
