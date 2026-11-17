@@ -31,6 +31,8 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     planned = _planned_count(manifest)
+    if planned <= 0:
+        return 2
     results = _results_by_index(manifest)
     findings: list[dict] = []
     trials: list[dict] = []
@@ -97,6 +99,8 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
         for item in payload.get("trials") or []
         if isinstance(item, dict) and item.get("id")
     }
+    if not planned:
+        return 2
     findings: list[dict] = []
     trials: list[dict] = []
     complete = 0
@@ -106,6 +110,19 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
             findings.append(
                 _finding(
                     "missing-trial", trial_id, f"Planned trial {trial_id} has no trial evidence."
+                )
+            )
+            trials.append(_trial_status(trial_id, ok=False))
+            continue
+        observations = (
+            trial.get("observations") if isinstance(trial.get("observations"), dict) else {}
+        )
+        if observations.get("state") == "missing":
+            findings.append(
+                _finding(
+                    "missing-observations",
+                    trial_id,
+                    f"Planned trial {trial_id} has no observations.",
                 )
             )
             trials.append(_trial_status(trial_id, ok=False))
@@ -120,7 +137,7 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
         trials=trials,
         findings=findings,
         complete=complete,
-        planned=len(planned) or 1,
+        planned=len(planned),
     )
 
 
