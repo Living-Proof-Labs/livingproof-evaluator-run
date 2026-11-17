@@ -4,12 +4,17 @@ Evaluates run infrastructure and evidence suitability for judging robot capabili
 
 ## Start here
 
-This repository is an initial project scaffold. Its description states its intended
-scope; it does not yet ship an evaluator, installation artifact, command interface,
-public API, or data contract. There is no executable quickstart yet.
+The first slice is one completeness check on hallway evidence: planned trial
+count versus observation files present, and declared digests matching. It reports
+test-system status only. It never grades the robot. Later checks are added one
+at a time; see [issue 3](https://github.com/Living-Proof-Labs/livingproof-evaluator-run/issues/3).
 
-Start by reading this scope and the [verification limits](verification.md). To
-propose behavior or ask about implementation, use
+```bash
+python -m livingproof_evaluator_run evidence/manifest.json --out result.json
+```
+
+Start with this scope and the [verification limits](verification.md). To propose
+behavior, use
 [Help / report an issue](https://github.com/Living-Proof-Labs/livingproof-evaluator-run/issues).
 
 ## Find related work
