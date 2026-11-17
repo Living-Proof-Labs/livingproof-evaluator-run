@@ -83,3 +83,37 @@ def test_missing_trial_fixture_is_error_and_inconclusive(tmp_path: Path) -> None
     assert "grade" not in result
     assert "verdict" not in result["integrity"]
     assert _validate(result) == []
+
+
+def test_mismatched_observation_digest_is_missing_observations(tmp_path: Path) -> None:
+    dest = tmp_path / "evidence"
+    import shutil
+
+    shutil.copytree(GOOD.parent, dest)
+    manifest_path = dest / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["trials"]["results"][1]["sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    out = tmp_path / "result.json"
+    assert _evaluate(manifest_path, out) == 0
+    result = json.loads(out.read_text(encoding="utf-8"))
+    categories = {f["category"] for f in result["integrity"]["checks"][0]["findings"]}
+    assert categories == {"missing-observations"}
+    assert result["integrity"]["run"]["conclusion"] == "INCONCLUSIVE"
+    assert _validate(result) == []
+
+
+def test_cli_writes_the_good_fixture_result(tmp_path: Path) -> None:
+    import subprocess
+
+    out = tmp_path / "result.json"
+    done = subprocess.run(
+        ["python", "-m", "livingproof_evaluator_run", str(GOOD), "--out", str(out)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert result["integrity"]["run"]["success"] is True
+    assert _validate(result) == []
