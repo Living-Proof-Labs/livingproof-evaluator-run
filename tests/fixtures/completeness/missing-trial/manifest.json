@@ -1,0 +1,24 @@
+{
+  "format": "livingproof-hallway-evidence/2.0.0",
+  "run_id": "fixture-completeness",
+  "plan": {
+    "trials": {
+      "count": 2
+    }
+  },
+  "trials": {
+    "count": 2,
+    "results": [
+      {
+        "index": 1,
+        "path": "trials/trial-01.json",
+        "sha256": "194044176c46273cec194959506ec261292a38472df65efa0a1ef3cd3e8b7064"
+      },
+      {
+        "index": 2,
+        "path": "trials/trial-02.json",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  }
+}
