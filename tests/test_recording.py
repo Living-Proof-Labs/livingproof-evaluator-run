@@ -458,6 +458,41 @@ def test_version_1_0_0_still_judges_a_file_with_no_valid_footer_as_the_contract_
     assert outcome.version == "1.0.0" and outcome.not_checked is None
 
 
+def test_version_1_0_0_from_evidence_reports_a_truncated_file_once(tmp_path: Path) -> None:
+    """On the evidence path, 1.0.0 still reports a file the reader could not read as a single
+    mcap-incomplete, with no missing-channel (PR 16's truncation-once). The request path and
+    judge() without the flag keep the contract's extra missing-channel findings."""
+    folder = _evidence(tmp_path, channels=["/base_pose", "/joint_states"])
+    media = _media(tmp_path, folder, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    results = {row["index"]: row for row in manifest["trials"]["results"]}
+    outcome = module().from_evidence(manifest, media, 3, results, "1.0.0")
+    assert [f["category"] for f in outcome.findings] == ["mcap-incomplete"]
+    assert outcome.findings[0]["trial_id"] == "trial-02"
+    assert "size limit" not in outcome.findings[0]["summary"]  # footer-less, not over-cap
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
+
+
+def test_version_1_0_0_from_evidence_reports_an_over_cap_file_once(tmp_path: Path) -> None:
+    """The same truncation-once rule covers a file the reader refused for size: one
+    mcap-incomplete, no missing-channel. Rivet's PR 19 rule for selectable 1.0.0."""
+    import bombs
+
+    def swap(index: int, path: Path) -> None:
+        if index == 2:
+            path.write_bytes(bombs.mcap_with_chunk(bombs.zeros_zstd(1 << 28)))
+
+    folder = _evidence(tmp_path, channels=["/base_pose", "/joint_states"])
+    media = _media(tmp_path, folder, edit=swap)
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    results = {row["index"]: row for row in manifest["trials"]["results"]}
+    outcome = module().from_evidence(manifest, media, 3, results, "1.0.0")
+    assert [f["category"] for f in outcome.findings] == ["mcap-incomplete"]
+    assert outcome.findings[0]["trial_id"] == "trial-02"
+    assert "size limit" in outcome.findings[0]["summary"]
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
+
+
 def test_a_complete_recording_with_a_missing_channel_is_still_a_missing_channel(
     tmp_path: Path,
 ) -> None:

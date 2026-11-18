@@ -431,3 +431,13 @@ def test_an_incomplete_entry_for_a_trial_that_is_not_present_is_not_inconsistent
     request["integrity"]["trials"][1]["recording"].pop("sha256", None)
     document = _run_request(request, tmp_path)
     assert document["integrity"]["run"]["test_system_status"] == "ERROR"
+
+
+def test_the_docs_table_does_not_call_no_media_not_recorded() -> None:
+    """No media is not applicable with an empty not_checked list, not a not-recorded trial.
+    The docs table must match the code."""
+    text = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    start = text.index("| `not-recorded`")
+    row = text[start : text.index("\n", start)]
+    assert "no media" not in row
+    assert "media.json" in row
