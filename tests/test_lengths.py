@@ -345,3 +345,35 @@ def test_blank_trial_id_is_caught_when_termination_findings_overflow_the_cap(
     err = capsys.readouterr().err
     assert "planned trial id is not plain text" in err
     assert "findings[" not in err
+
+
+def test_blank_trial_id_is_caught_when_recording_findings_overflow_the_cap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The recording report is appended before the fail-closed check, so the check sees its
+    # findings. Completeness gives exactly 50 findings with the blank one last; the recording
+    # findings overflow the cap and would drop the blank from the descriptor if they were not
+    # counted.
+    request = json.loads((EXAMPLES / "recording" / "findings" / "request.json").read_text())
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    probe = tmp_path / "probe.json"
+    assert main([str(source), "--out", str(probe)]) == 0
+    checks = {c["id"]: c for c in json.loads(probe.read_text())["integrity"]["checks"]}
+    assert checks["recording"]["findings"]
+    others = sum(len(c["findings"]) for name, c in checks.items() if name != "recording")
+    planned = request["integrity"]["manifest"]["planned_trials"]
+    assert others < MAX_FINDINGS
+    fillers = MAX_FINDINGS - 1 - others
+    request["integrity"]["manifest"]["planned_trials"] = [
+        *planned,
+        *({"id": f"filler-{index:03d}"} for index in range(fillers)),
+        {"id": "   "},
+    ]
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "planned trial id is not plain text" in err
+    assert "findings[" not in err
