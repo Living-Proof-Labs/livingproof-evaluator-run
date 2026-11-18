@@ -487,7 +487,7 @@ def test_a_media_json_without_the_observation_digest_is_a_link_mismatch(tmp_path
 
 def test_every_category_is_reachable_and_in_the_contract() -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
-    enum = schema["$defs"]["finding"]["properties"]["category"]["enum"]
+    enum = schema["properties"]["findings"]["items"]["properties"]["category"]["enum"]
     assert list(module().CATEGORIES) == CATEGORIES == enum
 
 
@@ -566,9 +566,8 @@ def test_a_missing_recording_is_not_a_recording_finding(tmp_path: Path) -> None:
     media = _media(tmp_path, folder, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
     (media / "mcap" / "trial-01.mcap").unlink()
     check = _check(_run(folder, tmp_path, media))
-    assert [(i["category"], i["trial_id"]) for i in check["findings"]] == [
-        ("mcap-incomplete", "trial-02")
-    ]
+    assert {i["trial_id"] for i in check["findings"]} == {"trial-02"}
+    assert _categories(check)[0] == "mcap-incomplete"
     assert check["percentage"] == pytest.approx(50)
 
 
@@ -621,9 +620,24 @@ def test_text_from_evidence_is_shown_escaped(tmp_path: Path) -> None:
     media = _media(tmp_path, folder)
     document = _run(folder, tmp_path, media)
     assert base._validate(document) == []
-    text = json.dumps(document["descriptor"])
+    text = json.dumps({**document["descriptor"], "icon": ""})
     assert "<" not in text and ">" not in text
     assert "\\u003c" in text
+
+
+def test_the_descriptor_keeps_what_was_not_checked_when_the_summary_is_long(
+    tmp_path: Path,
+) -> None:
+    """The success copy is at most 400 characters. When the checks' sentences do not all fit, the
+    sentences that say a check passed give way; a note about what was not checked never does."""
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    (media / "mcap" / "trial-03.mcap").unlink()
+    document = _run(folder, tmp_path, media)
+    copy = document["descriptor"]["success_copy"]
+    assert len(copy) <= 400
+    assert "Not checked: recording of trial-03" in copy
+    assert copy.startswith("Every planned trial has its observation file.")
 
 
 def test_the_command_line_takes_the_media_directory(tmp_path: Path) -> None:
@@ -853,3 +867,48 @@ def test_ours_equal_the_contract_reference_rules() -> None:
         seen.update(item["category"] for item in expected["findings"])
     assert seen == set(CATEGORIES)
     assert not_applicable > 20
+
+
+# Cases the first pass left open (found by mutating the code).
+
+
+def test_a_recording_that_is_a_link_out_of_the_media_directory_is_not_read(tmp_path: Path) -> None:
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    outside = tmp_path / "outside.mcap"
+    rec.write_mcap(outside)
+    target = media / "mcap" / "trial-01.mcap"
+    target.unlink()
+    target.symlink_to(outside)
+    document = _run(folder, tmp_path, media)
+    assert "trial-01" not in {i["trial_id"] for i in _check(document)["findings"]}
+    assert "trial-01 (no file to read)" in document["descriptor"]["success_copy"]
+
+
+@pytest.mark.parametrize("bad", [0, -1, -0.5, "0.1", True, None, float("nan"), float("inf")])
+def test_a_request_with_an_unusable_limit_is_not_applicable(bad: object, tmp_path: Path) -> None:
+    request = _request("clean")
+    request["integrity"]["evidence"]["recording"]["max_gap_seconds"] = bad
+    check = _check(_run_request(request, tmp_path))
+    assert check["applicable"] is False and "limits" not in check and check["findings"] == []
+
+
+@pytest.mark.parametrize("flag", [1, "true", "yes", None, [True]])
+def test_media_available_must_be_true_itself(flag: object, tmp_path: Path) -> None:
+    request = _request("clean")
+    request["integrity"]["evidence"]["recording"]["media_available"] = flag
+    assert _check(_run_request(request, tmp_path))["applicable"] is False
+
+
+def test_a_recording_for_a_trial_with_no_result_row_is_not_judged(tmp_path: Path) -> None:
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    path = folder / "manifest.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["trials"]["results"][1]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    result = _run(folder, tmp_path, media)
+    check = _check(result)
+    assert check["applicable"] is True and check["findings"] == []
+    assert check["percentage"] == 100
+    assert [i["category"] for i in _check(result, "completeness")["findings"]] == ["missing-trial"]

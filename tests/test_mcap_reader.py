@@ -40,7 +40,7 @@ def test_a_real_recording_is_complete_with_both_channels() -> None:
     assert result.complete is True
     assert result.reason is None
     stats = _stats(result)
-    assert sorted(stats) == [rec.JOINTS, rec.POSE]
+    assert sorted(stats) == [rec.POSE, rec.JOINTS]
     for channel in stats.values():
         assert channel.message_count == 559
         assert channel.backward_steps == 0
@@ -115,9 +115,15 @@ def test_a_file_with_no_summary_is_incomplete_but_keeps_what_it_holds(tmp_path: 
 
 
 def test_a_damaged_chunk_is_incomplete(tmp_path: Path) -> None:
+    """A byte flipped inside a chunk's data fails its CRC. (A flip in an index record leaves the
+    messages intact; ``media.json``'s digest is what catches that, see the recording check.)"""
+    from mcap.reader import make_reader
+
     path = rec.write_mcap(tmp_path / "a.mcap", rec.default_channels(200))
+    with path.open("rb") as stream:
+        index = make_reader(stream).get_summary().chunk_indexes[0]
     data = bytearray(path.read_bytes())
-    data[len(data) // 3] ^= 0xFF
+    data[index.chunk_start_offset + index.chunk_length // 2] ^= 0xFF
     path.write_bytes(bytes(data))
     _incomplete(path)
 
@@ -254,3 +260,24 @@ def test_the_readers_small_api() -> None:
 def test_a_gap_limit_is_not_a_reader_concern() -> None:
     names = {name.lower() for name in dir(reader())}
     assert not [n for n in names if "limit" in n or "default" in n or "required" in n]
+
+
+def test_a_chunk_whose_crc_does_not_match_is_incomplete(tmp_path: Path) -> None:
+    """Only the chunk's stored CRC is changed; its data still decompresses, so only the CRC check
+    can tell."""
+    import struct
+
+    from mcap.reader import make_reader
+
+    path = rec.write_mcap(tmp_path / "a.mcap", rec.default_channels(200))
+    with path.open("rb") as stream:
+        index = make_reader(stream).get_summary().chunk_indexes[0]
+    data = bytearray(path.read_bytes())
+    # opcode (1) + record length (8) + start time (8) + end time (8) + uncompressed size (8)
+    at = index.chunk_start_offset + 1 + 8 + 8 + 8 + 8
+    (crc,) = struct.unpack_from("<I", data, at)
+    assert crc != 0
+    struct.pack_into("<I", data, at, crc ^ 1)
+    path.write_bytes(bytes(data))
+    result = _incomplete(path)
+    assert "CRC" in result.reason or "crc" in result.reason.lower()
