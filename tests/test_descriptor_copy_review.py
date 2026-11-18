@@ -37,9 +37,10 @@ def test_a_real_lock_run_with_media_but_no_gap_limit_keeps_the_pass_sentences(
     tmp_path: Path,
 ) -> None:
     """Once the Run Integrity job is given --media (capability-verifier#156) and before a plan
-    declares max_gap_seconds (nothing does today), recording is not applicable. The new notes
-    that list each trial as not-recorded must not push the pins, plan-conformance or termination
-    pass sentences off the 400-character card. This is the same class of regression as PR 16."""
+    declares max_gap_seconds (nothing does today), recording is not applicable, with one
+    missing-limit note and an empty not_checked. That note must not push the pins,
+    plan-conformance or termination pass sentences off the 400-character card. This is the
+    same class of regression as PR 16."""
     folder = tmp_path / "evidence"
     shutil.copytree(PINS_GOOD, folder)
     media = tmp_path / "media"
@@ -51,3 +52,33 @@ def test_a_real_lock_run_with_media_but_no_gap_limit_keeps_the_pass_sentences(
     assert PINS_SENTENCE in copy
     assert PLAN_SENTENCE in copy
     assert TERMINATION_SENTENCE in copy
+    document = json.loads(out.read_text(encoding="utf-8"))
+    assert "max_gap_seconds" in copy and "no default" in copy
+    # Stop-reasons is dropped first when the card is tight so the pass sentences and the
+    # not-checked notes stay. The note is not stored on the termination check, so it is
+    # then absent from the result, and there is no "more notes" marker.
+    assert "Stop reasons:" not in copy
+    rest = json.dumps({key: value for key, value in document.items() if key != "descriptor"})
+    assert "Stop reasons:" not in rest
+    termination = next(c for c in document["integrity"]["checks"] if c["id"] == "termination")
+    assert "notes" not in termination
+    assert "more note" not in copy.lower()
+    recording = next(c for c in document["integrity"]["checks"] if c["id"] == "recording")
+    assert recording["applicable"] is False
+    assert recording["not_checked"] == []
+
+
+def test_a_real_lock_run_without_media_still_carries_the_stop_reasons_note(tmp_path: Path) -> None:
+    """When the card is not tight the default stop-reasons note stays on it. The media-but-no
+    gap-limit path drops that note first; this is the contrasting case from PR 16, already
+    367 characters or less on a real lock, which must keep the note."""
+    folder = tmp_path / "evidence"
+    shutil.copytree(PINS_GOOD, folder)
+    out = tmp_path / "result.json"
+    assert evaluate_evidence(folder / "manifest.json", out, None) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    copy = document["descriptor"]["success_copy"]
+    assert len(copy) <= 400
+    assert "Stop reasons:" in copy
+    assert TERMINATION_SENTENCE in copy
+    assert PINS_SENTENCE in copy
