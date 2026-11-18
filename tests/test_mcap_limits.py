@@ -2,8 +2,11 @@
 
 Vera's review of PR 16 measured a 32 KB file that expands to 1 GiB taking about 43 s and 1 GB
 RSS, and 4 GiB taking about 171 s and 4 GB. The reader now refuses, before it decompresses or
-parses past a limit, any recording whose chunks expand beyond a documented cap, and says so as a
-clear ``mcap-incomplete`` finding instead of crashing or running out of memory.
+parses past a limit, any recording whose chunks expand beyond a documented cap. At recording
+1.1.0 that file is not read, so it is truncated: completeness reports ``truncated-recording``
+and recording lists the trial ``not-present``. At selectable 1.0.0 it is still one
+``mcap-incomplete`` finding, with no missing-channel. Either way the evaluator does not crash
+or run out of memory.
 
 The bombs are crafted per test (``tests/bombs.py``): a few tens of kilobytes that would expand to
 512 MiB. Each is read in a fresh interpreter that reports its own elapsed time and peak RSS, so

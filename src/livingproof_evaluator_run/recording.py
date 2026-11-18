@@ -14,8 +14,9 @@ summary) or empty is not present. ``completeness`` reports it (``missing-recordi
 ``truncated-recording``, ``empty-recording``), so it is reported once: this check does not judge
 it, never emits ``mcap-incomplete`` and lists the trial in ``not_checked`` with the reason
 ``not-present``. A trial with no recording evidence at all is listed with ``not-recorded``. Every
-trial that was not judged is listed, also when nothing was judged. ``not_checked`` is required at
-1.1.0 and is empty when every trial was judged. ``mcap-incomplete`` is a finding of 1.0.0 only;
+trial that was not judged is listed when the check runs. ``not_checked`` is required at
+1.1.0 and is empty when every trial was judged, when there is no media, and when no usable
+gap limit was declared. ``mcap-incomplete`` is a finding of 1.0.0 only;
 ``version="1.0.0"`` selects the 1.0.0 rule, which judges such a file and has no ``not_checked``.
 
 A request whose trial says the recording is ``present`` while its evidence says the file is
@@ -25,7 +26,8 @@ status 2 and no result. The producer's own reading classifies such a file as tru
 
 The gap limit has no default. It comes from the evidence and nowhere else, and a gap equal to the
 limit is not a finding (only a larger one is). Without a usable limit the check is not applicable
-and says so; it never assumes one. The required channels come from the evidence too; on a
+and says so, with an empty ``not_checked`` (the same as no media) and one note about the
+missing limit; it never assumes one, and it does not list each trial as ``not-recorded``. The required channels come from the evidence too; on a
 manifest, where a plan may leave them out, ``DEFAULT_REQUIRED_CHANNELS`` applies and the summary
 says so. They are the two channels livingproof-sim-mujoco's media job always writes.
 
@@ -185,6 +187,8 @@ def judge(
     max_gap_seconds: float,
     trials: list[Trial],
     version: str = RECORDING_VERSION,
+    *,
+    truncation_once: bool = False,
 ) -> Outcome:
     """Judge each present recording. ``max_gap_seconds`` has no default: the caller takes it from
     the evidence. Findings follow the contract's order. ``not_checked`` is the caller's to set.
@@ -192,7 +196,10 @@ def judge(
     At 1.1.0 a recording is judged only when it is present, so a trial that is not ``complete``
     never reaches here and is a programming error. At 1.0.0, which the contract keeps valid, an
     incomplete recording gets ``mcap-incomplete`` and a ``missing-channel`` for each required
-    channel its channel list lacks, exactly as the contract's 1.0.0 rule says.
+    channel its channel list lacks, exactly as the contract's 1.0.0 rule says. With
+    ``truncation_once`` it gets ``mcap-incomplete`` and no ``missing-channel``, since the reader
+    could not read it and its absent channels say nothing more (livingproof-evaluator#34). Only
+    the evidence path sets it; a request is judged by the contract.
     """
     old = version == "1.0.0"
     findings: list[dict] = []
@@ -214,7 +221,7 @@ def judge(
                 )
             )
         channels = {channel.topic: channel for channel in trial.channels}
-        for topic in required_channels:
+        for topic in [] if truncation_once and not trial.complete else required_channels:
             channel = channels.get(topic)
             if channel is None or not _number(channel.message_count) or channel.message_count == 0:
                 mine.append(
@@ -552,10 +559,13 @@ def from_evidence(
         _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
     )
     if limit is None:
+        # Same as no media: not applicable, empty not_checked, one note about the missing
+        # limit. Per-trial not-recorded notes would push pass sentences off the 400-character
+        # card, and not-recorded means a declared check could not be run; here nothing was
+        # declared.
         return _not_applicable(
             "the evidence declares no usable max_gap_seconds and there is no default",
             version,
-            unjudged(set()),
         )
     declared = _dig(manifest, "plan", RECORDING_ID, "required_channels")
     channels = usable_channels(declared)
@@ -600,7 +610,7 @@ def from_evidence(
         )
     if old and skipped:
         notes.append(f"Not checked: recording of {listed_ids(skipped)} (no file to read).")
-    outcome = judge(channels, limit, trials, version)
+    outcome = judge(channels, limit, trials, version, truncation_once=old)
     if not outcome.applicable:
         return _not_applicable(
             "no recording file is present to judge",

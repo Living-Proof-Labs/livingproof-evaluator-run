@@ -215,11 +215,13 @@ everything was judged:
 | Reason | When |
 | --- | --- |
 | `not-present` | `media.json` lists the trial's recording and it is missing, truncated or empty. `completeness` reports it |
-| `not-recorded` | nothing was recorded for the trial: it is not in `media.json`, or there is no media, or no usable gap limit to judge it by |
+| `not-recorded` | nothing was recorded for the trial: it is not in `media.json` |
 
 With nothing judged, or no media, the check is not applicable: it reports no percentage and no
-`limits`. A run with no media passes as it did before this check, and its card carries no note
-about it.
+`limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
+its card carries no note about it. A run with media but no usable gap limit is also not
+applicable, with an empty `not_checked` and one note that the limit is not declared: it does not
+list each trial as `not-recorded`.
 
 **Truncation is reported once.** A recording with no valid footer is `truncated-recording` from
 `completeness`, which is why `recording` lists the trial `not-present` and says nothing else. On a

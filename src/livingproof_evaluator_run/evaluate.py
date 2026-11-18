@@ -558,12 +558,28 @@ def _write_result(
     else:
         shown = all_shown
     if success:
-        # The copy is at most 400 characters. A sentence that says a check passed is dropped,
-        # last check first, before a note about what was not checked is ever cut.
+        # The copy is at most 400 characters. "Stop reasons" notes are dropped first when the
+        # card is tight, so a "Not checked" note can share it with the pass sentences. A
+        # sentence that says a check passed is then dropped last-check-first, before a note
+        # about what was not checked is ever cut.
         parts = [report.success_copy for report in reports if report.success_copy]
-        while parts and len(" ".join([*parts, notes] if notes else parts)) > 400:
+        raw_notes = [note for report in reports for note in report.notes]
+        if unchecked:
+            raw_notes.append(f"Not checked: {', '.join(unchecked)}.")
+        stop, kept = [], []
+        for note in raw_notes:
+            (stop if note.startswith("Stop reasons:") else kept).append(note)
+
+        def packed(pass_parts: list[str], extra: list[str]) -> str:
+            return " ".join([*pass_parts, *extra])
+
+        tail = [*stop, *kept]
+        while stop and len(packed(parts, tail)) > 400:
+            stop.pop()
+            tail = [*stop, *kept]
+        while parts and len(packed(parts, tail)) > 400:
             parts.pop()
-        descriptor["success_copy"] = _clip(" ".join([*parts, notes] if notes else parts), 400)
+        descriptor["success_copy"] = _clip(packed(parts, tail), 400)
     else:
         kept = all_shown[: MAX_FINDINGS - 1] if overflow_note else shown
         problems = " ".join(item["text"] for item in kept)
