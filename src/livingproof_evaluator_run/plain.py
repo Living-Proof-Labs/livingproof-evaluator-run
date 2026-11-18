@@ -11,8 +11,8 @@ still a pin that differs from the lock, so it stays a finding, and the reader ca
 what was recorded. ``a<b>\\n`` is shown as ``a\\u003cb\\u003e\\x0a``. The same escape applies to
 anything else that reaches the descriptor, so the result validates whatever the evidence says.
 
-This module repeats the contract's pattern because the evaluator has no runtime dependency on
-the contract kit. ``evaluate`` checks its own descriptor against it before writing, so a
+This module repeats the contract's pattern and lengths because the evaluator has no runtime dependency on
+the contract kit. ``evaluate`` checks its own descriptor against them before writing, so a
 result that would not validate is never written and the command exits non-zero instead.
 """
 
@@ -31,6 +31,22 @@ _INVISIBLE = re.compile(
 )
 # A bound for a value copied out of evidence. A sha256 with its prefix is 71 characters.
 VALUE_LIMIT = 100
+
+# Maximum lengths in the contract's ``descriptor.schema.json`` (kit v1.0.8). The descriptor
+# and each finding in it are checked against these before a result is written.
+DESCRIPTOR_LIMITS = {
+    "title": 80,
+    "short_title": 40,
+    "icon_accessible_name": 120,
+    "purpose": 400,
+    "version": 64,
+    "kind": 40,
+    "source": 120,
+    "success_copy": 400,
+    "details_copy": 1000,
+}
+FINDING_LIMITS = {"text": 280, "severity": 40, "time": 40, "trial": 40, "reported_by": 80}
+MAX_FINDINGS = 50
 
 
 def is_plain(text: object) -> bool:

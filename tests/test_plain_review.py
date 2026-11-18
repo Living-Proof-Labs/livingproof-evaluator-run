@@ -1,8 +1,8 @@
 """Reviewer coverage for the plain-text guard and the not-applicable rule (PR 9, head 80cc8fd).
 
-Scripted from Vera's recheck probes. Every test passes on 80cc8fd except the one marked
-``xfail(strict=True)``: a gap in the request path, where a trial id longer than the contract
-allows still gives an invalid result and exit code 0. Delete the marker when it is fixed.
+Scripted from Vera's recheck probes. Every test passed on 80cc8fd except the long trial id on
+the request path, which gave an invalid result and exit code 0. It was a strict xfail and is
+fixed now: ids and texts are clipped in the descriptor and the guard also checks lengths.
 """
 
 from __future__ import annotations
@@ -142,12 +142,6 @@ def test_a_lock_that_declares_a_subject_the_run_did_not_record_is_not_applicable
 
 
 @pytest.mark.parametrize("size", [41, 100, 300])
-@pytest.mark.xfail(
-    strict=True,
-    reason="Gap (recheck of PR 9): on the request path a trial id longer than the contract's "
-    "40 characters for a descriptor finding's trial gives an invalid result with exit code 0. "
-    "The guard checks the plain-text pattern but not maxLength (trial 40, text 280).",
-)
 def test_a_long_trial_id_still_gives_a_conforming_result(tmp_path: Path, size: int) -> None:
     request = json.loads((EXAMPLES / "pins" / "request.json").read_text())
     request["integrity"]["manifest"]["planned_trials"] = [{"id": "t" * size}]

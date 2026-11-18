@@ -10,7 +10,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from livingproof_evaluator_run import pins
-from livingproof_evaluator_run.plain import is_plain, plain
+from livingproof_evaluator_run.plain import (
+    DESCRIPTOR_LIMITS,
+    FINDING_LIMITS,
+    MAX_FINDINGS,
+    is_plain,
+    plain,
+)
 from livingproof_evaluator_run.identity import (
     CHECK_ID,
     CHECK_VERSION,
@@ -296,11 +302,18 @@ def _write_result(
     notes = " ".join(note for report in reports for note in report.notes)
     # Text copied out of evidence is escaped, so the descriptor matches the contract's
     # plain-text pattern whatever the evidence holds.
+    # They are also cut to the contract's lengths. The check's own findings keep the full
+    # trial id; only the descriptor's short form is clipped.
     shown = [
-        {key: plain(value) if isinstance(value, str) else value for key, value in item.items()}
+        {
+            key: _clip(plain(value), FINDING_LIMITS.get(key, 280))
+            if isinstance(value, str)
+            else value
+            for key, value in item.items()
+        }
         for report in reports
         for item in report.shown
-    ][:50]
+    ][:MAX_FINDINGS]
     if success:
         parts = [report.success_copy for report in reports if report.success_copy] + (
             [notes] if notes else []
@@ -329,12 +342,11 @@ def _write_result(
         "integrity": {"run": run, "trials": trials, "checks": checks},
         "descriptor": descriptor,
     }
-    refused = _not_plain(descriptor)
+    refused = _refused(descriptor)
     if refused:
         # Never write a result the contract would reject and report success.
         print(
-            f"livingproof-evaluator-run: descriptor text is not plain text ({refused}); "
-            "no result written",
+            f"livingproof-evaluator-run: descriptor {refused}; no result written",
             file=sys.stderr,
         )
         return 1
@@ -344,15 +356,36 @@ def _write_result(
     return 0
 
 
-def _not_plain(descriptor: dict) -> str | None:
-    """The first descriptor field whose text the contract's plain-text pattern refuses."""
+def _refused(descriptor: dict) -> str | None:
+    """Why the contract would reject the descriptor's text, or None.
+
+    Checks the plain-text pattern and the maximum length of each field (the contract's
+    ``descriptor.schema.json``), for the descriptor and for every finding.
+    """
+    findings = descriptor.get("findings", [])
+    if len(findings) > MAX_FINDINGS:
+        return f"has {len(findings)} findings, more than {MAX_FINDINGS}"
     for key, value in descriptor.items():
-        if key == "icon":
-            continue
-        if isinstance(value, str) and not is_plain(value):
-            return key
-    for index, item in enumerate(descriptor.get("findings", [])):
+        if key not in ("icon", "findings"):
+            reason = _text_problem(key, value, DESCRIPTOR_LIMITS)
+            if reason:
+                return reason
+    for index, item in enumerate(findings):
         for key, value in item.items():
-            if isinstance(value, str) and not is_plain(value):
-                return f"findings[{index}].{key}"
+            reason = _text_problem(f"findings[{index}].{key}", value, FINDING_LIMITS, key)
+            if reason:
+                return reason
+    return None
+
+
+def _text_problem(
+    name: str, value: object, limits: dict[str, int], key: str | None = None
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if not is_plain(value):
+        return f"text is not plain text ({name})"
+    limit = limits.get(key or name)
+    if limit is not None and len(value) > limit:
+        return f"text is too long ({name} is {len(value)} characters, the limit is {limit})"
     return None
