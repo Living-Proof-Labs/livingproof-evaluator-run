@@ -1,0 +1,43 @@
+{
+  "format": "livingproof-run-manifest/0.1",
+  "run_id": "walk-corner-left-unitree-go1-playground-20261118T064836Z",
+  "specification": {
+    "tag": "v3.1.0",
+    "commit": "9ee830201f05943feb2b9787eea2ea747431d935"
+  },
+  "scenario": "walk-corner-left@0.2.0",
+  "world": {
+    "id": "hallway-corner",
+    "version": "0.2.0",
+    "sha256": "f398f2705e630750f7b7ef3035ba4b5aed076de1f417165e58540e973150678e"
+  },
+  "simulator": {
+    "engine": "mujoco",
+    "version": "3.17.0",
+    "adapter": "livingproof-sim-mujoco",
+    "adapter_commit": "4e97b6c1ee72a9f6598a91d0a1476116dc17ae13"
+  },
+  "robot": {
+    "id": "unitree-go1",
+    "repo": "https://github.com/Living-Proof-Labs/livingproof-unitree-go1",
+    "commit": "5d95e5a1d00a81c711eb4f83e259b82126ec6592",
+    "profile_sha256": "6fb708ddda5e800eae14ef1a9af52c415f905b8512871ca5100eed54ce71eb14"
+  },
+  "configuration": {
+    "name": "playground",
+    "version": "1.0.0",
+    "sha256": "07bcbab38570ddb1c76c8508916298f2dc633be1543a78af7971bec338d6f930"
+  },
+  "parameters": {
+    "command_speed": 0.5,
+    "route_length": 5.5,
+    "time_limit": 27.0,
+    "fall_height": 0.18,
+    "wall_clearance": 0.1,
+    "lateral_limit": 0.609,
+    "spawn": "spawn-west"
+  },
+  "trials": {
+    "count": 1
+  }
+}
