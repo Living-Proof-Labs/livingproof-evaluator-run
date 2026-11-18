@@ -340,7 +340,9 @@ def from_evidence(
     ``media.json`` and ``mcap/``, or None when the run has no media.
     """
     if media is None:
-        return _not_applicable("no media was given")
+        # No media directory is not a finding about this run, so it adds no note: a note on every
+        # run without media would push a pass sentence off the 400-character card.
+        return Outcome(False)
     media = Path(media)
     document = _read_json(media / "media.json")
     if not isinstance(document, dict):

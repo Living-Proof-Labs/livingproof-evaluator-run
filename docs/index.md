@@ -189,7 +189,7 @@ judged when `media.json` lists a planned trial and its file is there; a recordin
 there is left to `completeness`. `completeness` on a manifest does not look at recordings yet, so
 the summary names the trials that were not judged. With nothing judged, or no media, the check is
 not applicable: it reports no percentage and no `limits`. A run with no media passes as it did
-before this check.
+before this check, and its card carries no note about it.
 
 **What runs today, and what waits.** Run by hand with `--media` on a downloaded media artifact,
 the check works as above once the evidence declares a gap limit. In the capability-verifier
