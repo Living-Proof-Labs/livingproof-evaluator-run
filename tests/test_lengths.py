@@ -247,7 +247,7 @@ def test_empty_trial_id_past_the_cap_exits_2_with_nothing_written(
     assert not out.exists()
 
 
-@pytest.mark.parametrize("blank", ["   ", "​"])
+@pytest.mark.parametrize("blank", ["   ", "\u200b", "\ufeff", "\u00a0"])
 @pytest.mark.parametrize(
     "ids_before",
     [MAX_FINDINGS - 1, MAX_FINDINGS],
@@ -264,3 +264,36 @@ def test_blank_trial_id_past_the_cap_fails_closed(
     assert main([str(_request(tmp_path, ids)), "--out", str(out)]) == 1
     assert not out.exists()
     assert "not plain text" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad_id", [None, 0, 123])
+@pytest.mark.parametrize(
+    "ids_before",
+    [0, MAX_FINDINGS - 1, MAX_FINDINGS],
+    ids=["only", "50th-with-pins-overflow", "51st"],
+)
+def test_non_string_trial_id_exits_2_with_nothing_written(
+    tmp_path: Path, bad_id: object, ids_before: int
+) -> None:
+    request = json.loads((EXAMPLES / "pins" / "request.json").read_text())
+    ids = [f"trial-{index:03d}" for index in range(ids_before)] + [bad_id]
+    request["integrity"]["manifest"]["planned_trials"] = [{"id": item} for item in ids]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+def test_blank_id_exactly_at_the_cap_is_caught_by_the_descriptor_guard(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The pins example adds 5 pin findings, so 45 completeness findings plus those
+    # pins land exactly on the cap: no overflow note, the blank stays visible, and
+    # the descriptor guard refuses it.
+    out = tmp_path / "result.json"
+    ids = [f"trial-{index:03d}" for index in range(44)] + ["   "]
+    assert main([str(_request(tmp_path, ids)), "--out", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "not plain text" in err and "findings[44].trial" in err
