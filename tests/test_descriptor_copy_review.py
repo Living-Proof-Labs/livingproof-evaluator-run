@@ -54,18 +54,20 @@ def test_a_real_lock_run_with_media_but_no_gap_limit_keeps_the_pass_sentences(
     assert TERMINATION_SENTENCE in copy
     document = json.loads(out.read_text(encoding="utf-8"))
     assert "max_gap_seconds" in copy and "no default" in copy
-    # Stop-reasons is dropped first when the card is tight so the pass sentences and the
-    # not-checked notes stay. The note is not stored on the termination check, so it is
-    # then absent from the result, and there is no "more notes" marker.
+    # Stop-reasons moves to the details when the card is tight, so the pass sentences
+    # and not-checked notes stay without losing the full stop-reasons note.
     assert "Stop reasons:" not in copy
-    rest = json.dumps({key: value for key, value in document.items() if key != "descriptor"})
-    assert "Stop reasons:" not in rest
+    assert document["descriptor"].get("details_copy") == (
+        "Stop reasons: the default allowed list, which excludes simulation-broken "
+        "(the plan declares none)."
+    )
     termination = next(c for c in document["integrity"]["checks"] if c["id"] == "termination")
     assert "notes" not in termination
-    assert "more note" not in copy.lower()
+    assert "More notes." in copy
     recording = next(c for c in document["integrity"]["checks"] if c["id"] == "recording")
     assert recording["applicable"] is False
     assert recording["not_checked"] == []
+    assert base._validate(document) == []
 
 
 def test_a_real_lock_run_without_media_still_carries_the_stop_reasons_note(tmp_path: Path) -> None:
@@ -82,3 +84,6 @@ def test_a_real_lock_run_without_media_still_carries_the_stop_reasons_note(tmp_p
     assert "Stop reasons:" in copy
     assert TERMINATION_SENTENCE in copy
     assert PINS_SENTENCE in copy
+    assert "More notes." not in copy
+    assert "details_copy" not in document["descriptor"]
+    assert base._validate(document) == []
