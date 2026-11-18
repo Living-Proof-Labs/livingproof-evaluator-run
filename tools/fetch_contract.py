@@ -1,4 +1,4 @@
-"""Checkout livingproof-evaluator v1.0.8 for the conformance kit."""
+"""Checkout livingproof-evaluator v1.1.0 for the conformance kit."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / ".livingproof-evaluator"
-TAG = "v1.0.8"
+TAG = "v1.1.0"
 REPO = "https://github.com/Living-Proof-Labs/livingproof-evaluator.git"
 
 

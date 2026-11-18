@@ -2,7 +2,7 @@
 
 Run integrity grows one check at a time. Every time we lose time to something that wasn't the robot, the follow-up is a new integrity check, plus the run that would have caught it.
 
-This repository implements the [Run Integrity](https://github.com/Living-Proof-Labs/livingproof-evaluator/blob/v1.0.8/docs/run-integrity.md) evaluator. It gives a separate opinion on whether anything besides the robot shaped a run. It invalidates the run; it does not grade the robot.
+This repository implements the [Run Integrity](https://github.com/Living-Proof-Labs/livingproof-evaluator/blob/v1.1.0/docs/run-integrity.md) evaluator. It gives a separate opinion on whether anything besides the robot shaped a run. It invalidates the run; it does not grade the robot.
 
 The first slice is one check, `completeness` 1.0.0: planned trial count versus observation files present, and `trials.results[].sha256` matching, on `livingproof-hallway-evidence/2.0.0`. It does not claim MCAP completeness, empty or truncated distinctions beyond a missing or mismatched file, or `timeout` / `crash` termination.
 

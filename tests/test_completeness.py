@@ -2,7 +2,7 @@
 
 Fail-first fixtures: one good evidence run, and one doctored missing-trial
 run. Results must be livingproof-evaluator-result/1.1.0 documents that pass
-the livingproof-evaluator v1.0.8 conformance kit.
+the livingproof-evaluator v1.1.0 conformance kit.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def _evaluate(manifest: Path, out: Path) -> int:
 def _validate(document: dict) -> list[str]:
     if not (CONTRACT / "tools" / "validate_contract.py").is_file():
         raise RuntimeError(
-            "livingproof-evaluator v1.0.8 is not checked out at "
+            "livingproof-evaluator v1.1.0 is not checked out at "
             f"{CONTRACT}. Run: python tools/fetch_contract.py"
         )
     sys.path.insert(0, str(CONTRACT / "tests"))

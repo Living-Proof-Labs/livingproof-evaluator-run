@@ -1,6 +1,6 @@
 """Descriptor lengths: clipped to the contract's limits, and guarded before writing.
 
-livingproof-evaluator-run#10, from the recheck of PR 9. The descriptor schema (kit v1.0.8)
+livingproof-evaluator-run#10, from the recheck of PR 9. The descriptor schema (kit v1.1.0)
 allows a finding's ``trial`` 40 characters and its ``text`` 280. Over-limit evidence is clipped
 in the descriptor, and a descriptor that is still over a limit is never written.
 """

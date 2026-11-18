@@ -32,7 +32,7 @@ _INVISIBLE = re.compile(
 # A bound for a value copied out of evidence. A sha256 with its prefix is 71 characters.
 VALUE_LIMIT = 100
 
-# Maximum lengths in the contract's ``descriptor.schema.json`` (kit v1.0.8). The descriptor
+# Maximum lengths in the contract's ``descriptor.schema.json`` (kit v1.1.0). The descriptor
 # and each finding in it are checked against these before a result is written.
 DESCRIPTOR_LIMITS = {
     "title": 80,
