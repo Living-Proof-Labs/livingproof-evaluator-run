@@ -10,7 +10,9 @@ The first slice is one check, `completeness` 1.0.0: planned trial count versus o
 python -m livingproof_evaluator_run evidence/manifest.json --out result.json
 ```
 
-The result is a `livingproof-evaluator-result/1.1.0` document. A failed completeness check reports test-system status `ERROR` and conclusion `INCONCLUSIVE`. It never changes a robot grade.
+`pins` 1.0.0 compares the pins the verification lock declares with what the run recorded: world, configuration and runner today. Specs and verifier are reported as not checked until the evidence records them. See [the checks](docs/index.md#checks).
+
+The result is a `livingproof-evaluator-result/1.1.0` document. A failed check reports test-system status `ERROR` and conclusion `INCONCLUSIVE`. It never changes a robot grade.
 
 **Documentation** — [manual source](docs/index.md)
 (publication pending; no verified live manual yet).
