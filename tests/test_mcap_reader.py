@@ -183,12 +183,22 @@ def test_equal_timestamps_are_not_backwards_and_are_not_a_gap() -> None:
     assert a.max_gap_ns == 0
 
 
-def test_the_gap_is_the_largest_step_forward_and_ignores_steps_back() -> None:
+def test_the_gap_is_measured_in_log_time_order_not_file_order() -> None:
+    """Out-of-order writes are not a capture gap (livingproof-evaluator#34): the gap is the
+    largest step between consecutive log times, whatever order the messages were stored in."""
     (a,) = reader().channel_stats(_times({"/a": [0, 20, 10, 30]}))
-    # 0 -> 20 is 20, 20 -> 10 goes back, 10 -> 30 is 20.
-    assert a.max_gap_ns == 20
+    # In log time 0, 10, 20, 30: the largest step is 10. In file order it would be 20.
+    assert a.max_gap_ns == 10
     (b,) = reader().channel_stats(_times({"/a": [0, 10, 5, 100]}))
-    assert b.max_gap_ns == 95
+    # In log time 0, 5, 10, 100.
+    assert b.max_gap_ns == 90
+    (c,) = reader().channel_stats(_times({"/a": [100, 0, 10, 5]}))
+    assert c.max_gap_ns == 90
+
+
+def test_a_step_back_is_still_counted_when_the_gap_is_measured_in_log_time() -> None:
+    (a,) = reader().channel_stats(_times({"/a": [0, 20, 10, 30]}))
+    assert a.backward_steps == 1
 
 
 def test_one_message_has_no_gap() -> None:
@@ -225,6 +235,15 @@ def test_a_recording_with_a_backward_step_reports_it(tmp_path: Path) -> None:
     stats = _stats(result)
     assert stats[rec.POSE].backward_steps == 1
     assert stats[rec.JOINTS].backward_steps == 0
+
+
+def test_a_recording_with_two_swapped_messages_has_no_gap_over_the_period(tmp_path: Path) -> None:
+    channels = rec.default_channels(50)
+    channels[rec.POSE][20], channels[rec.POSE][21] = channels[rec.POSE][21], channels[rec.POSE][20]
+    stats = _stats(reader().inspect(rec.write_mcap(tmp_path / "a.mcap", channels)))
+    # In file order the step 19 -> 21 is two periods; in log time every step is one period.
+    assert stats[rec.POSE].backward_steps == 1
+    assert stats[rec.POSE].max_gap_ns == rec.PERIOD_NS
 
 
 def test_a_recording_with_a_hole_reports_the_gap(tmp_path: Path) -> None:

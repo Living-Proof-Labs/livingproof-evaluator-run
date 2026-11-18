@@ -361,6 +361,63 @@ def test_a_truncated_recording_is_incomplete(tmp_path: Path) -> None:
     _conforming_error(document)
 
 
+def test_a_truncated_recording_is_reported_once_not_as_a_missing_channel_per_channel(
+    tmp_path: Path,
+) -> None:
+    """The cause reads clearly (livingproof-evaluator#34): one mcap-incomplete finding for the
+    truncated trial, not also a missing-channel for each required channel the reader never saw."""
+    _, check = _doctored(tmp_path, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
+    assert _categories(check) == ["mcap-incomplete"]
+    assert [item["trial_id"] for item in check["findings"]] == ["trial-02"]
+    assert check["percentage"] == pytest.approx(100 * 2 / 3)
+
+
+def test_a_truncated_recording_that_also_differs_from_media_json_says_both(tmp_path: Path) -> None:
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    rec.truncate(media / "mcap" / "trial-02.mcap")
+    check = _check(_run(folder, tmp_path, media))
+    assert _categories(check) == ["mcap-incomplete", "media-file-mismatch"]
+
+
+def test_a_recording_that_is_not_an_mcap_is_not_also_a_missing_channel(tmp_path: Path) -> None:
+    def edit(index: int, path: Path) -> None:
+        if index == 1:
+            path.write_bytes(b"this is not a recording")
+
+    _, check = _doctored(tmp_path, edit=edit)
+    assert _categories(check) == ["mcap-incomplete"]
+
+
+def test_a_complete_recording_with_a_missing_channel_is_still_a_missing_channel(
+    tmp_path: Path,
+) -> None:
+    only_pose = {1: {rec.POSE: rec.steps(50)}}
+    _, check = _doctored(tmp_path, channels=only_pose)
+    assert _categories(check) == ["missing-channel"]
+
+
+def test_swapped_messages_are_a_backwards_timestamp_and_not_a_gap(tmp_path: Path) -> None:
+    """Gaps are measured in log-time order (livingproof-evaluator#34). Swapping two messages makes
+    a step back, and in file order a step of two periods; in log time every step is one period, so
+    a limit between one and two periods is met."""
+    channels = rec.default_channels(50)
+    pose = channels[rec.POSE]
+    pose[20], pose[21] = pose[21], pose[20]
+    _, check = _doctored(tmp_path, gap=0.03, channels={2: channels})
+    assert _categories(check) == ["timestamps-backwards"]
+    assert check["findings"][0]["trial_id"] == "trial-02"
+
+
+def test_a_real_hole_is_still_a_gap_when_messages_are_written_out_of_order(tmp_path: Path) -> None:
+    channels = rec.default_channels(50)
+    pose = channels[rec.POSE]
+    pose[20], pose[21] = pose[21], pose[20]
+    pose[30:] = [t + 100_000_000 for t in pose[30:]]
+    _, check = _doctored(tmp_path, gap=0.05, channels={2: channels})
+    assert _categories(check) == ["timestamps-backwards", "message-gap-exceeded"]
+
+
 def test_a_recording_without_a_summary_is_incomplete(tmp_path: Path) -> None:
     _, check = _doctored(tmp_path, edit=lambda i, p: rec.without_summary(p) if i == 3 else None)
     assert _categories(check) == ["mcap-incomplete"]
