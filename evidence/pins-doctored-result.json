@@ -1,0 +1,97 @@
+{
+  "format": "livingproof-evaluator-result/1.1.0",
+  "evaluator": {
+    "id": "livingproof-run-integrity",
+    "version": "1.0.0",
+    "kind": "integrity",
+    "execution": "deterministic",
+    "display_name": "Run Integrity",
+    "publisher": "Living Proof Labs",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+  },
+  "inputs": [
+    {
+      "role": "manifest",
+      "uri": "manifest.json",
+      "sha256": "1d70b4260f0b91d5bad73670d09754624c30e7dd16a65734cdba540f9928cdac"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-01.json",
+      "sha256": "a5adcfe9c24a4a9b547ea3a209efebc245f0c512442e1c48ed537c643ea4b7c3"
+    }
+  ],
+  "timestamps": {
+    "started_at": "2026-11-18T07:24:19Z",
+    "completed_at": "2026-11-18T07:24:19Z"
+  },
+  "integrity": {
+    "run": {
+      "id": "run-1",
+      "test_system_status": "ERROR",
+      "success": false,
+      "percentage": 20.0,
+      "conclusion": "INCONCLUSIVE"
+    },
+    "trials": [
+      {
+        "id": "trial-01",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      }
+    ],
+    "checks": [
+      {
+        "id": "completeness",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": true,
+        "percentage": 100.0,
+        "findings": []
+      },
+      {
+        "id": "pins",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": false,
+        "percentage": 20.0,
+        "findings": [
+          {
+            "category": "hash-mismatch",
+            "classification": "test_system",
+            "summary": "The runner pin differs: the verification lock declares 4e97b6c1ee72a9f6598a91d0a1476116dc17ae13, the run recorded 0000000000000000000000000000000000000000 (environment.runner.commit).",
+            "subject": "runner"
+          },
+          {
+            "category": "hash-mismatch",
+            "classification": "test_system",
+            "summary": "The world pin differs: the verification lock declares f398f2705e630750f7b7ef3035ba4b5aed076de1f417165e58540e973150678e, the run recorded 1111111111111111111111111111111111111111111111111111111111111111 (run-manifest.json world.sha256).",
+            "subject": "world"
+          }
+        ]
+      }
+    ]
+  },
+  "descriptor": {
+    "title": "Run Integrity",
+    "purpose": "Judges whether the run and the test system can be trusted.",
+    "version": "1.0.0",
+    "kind": "Test system",
+    "source": "Living Proof Labs",
+    "tier": "test_system_status",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
+    "icon_accessible_name": "Run Integrity",
+    "details_copy": "The runner pin differs: the verification lock declares 4e97b6c1ee72a9f6598a91d0a1476116dc17ae13, the run recorded 0000000000000000000000000000000000000000 (environment.runner.commit). The world pin differs: the verification lock declares f398f2705e630750f7b7ef3035ba4b5aed076de1f417165e58540e973150678e, the run recorded 1111111111111111111111111111111111111111111111111111111111111111 (run-manifest.json world.sha256). Not checked: specs, verifier.",
+    "findings": [
+      {
+        "text": "The runner pin differs: the verification lock declares 4e97b6c1ee72a9f6598a91d0a1476116dc17ae13, the run recorded 0000000000000000000000000000000000000000 (environment.runner.commit).",
+        "severity": "Needs attention"
+      },
+      {
+        "text": "The world pin differs: the verification lock declares f398f2705e630750f7b7ef3035ba4b5aed076de1f417165e58540e973150678e, the run recorded 1111111111111111111111111111111111111111111111111111111111111111 (run-manifest.json world.sha256).",
+        "severity": "Needs attention"
+      }
+    ]
+  }
+}
