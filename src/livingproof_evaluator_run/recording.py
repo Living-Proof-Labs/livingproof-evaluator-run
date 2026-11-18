@@ -49,7 +49,10 @@ from livingproof_evaluator_run.plain import shown
 RECORDING_ID = "recording"
 RECORDING_VERSION = "1.0.0"
 # What an ``mcap-incomplete`` finding says when the reader refused the file for its size
-# (``mcap_reader.Caps``) instead of failing to open it.
+# (``mcap_reader.Caps``) instead of failing to open it. A named finding for this is
+# livingproof-evaluator#42 (owned by Rivet); recording 1.1.0 will not emit
+# ``mcap-incomplete``, so adoption of that contract should use the named finding once
+# it exists.
 CAP_SUMMARY = (
     "The recording expands past the evaluator's size limit when decompressed, so it was not read."
 )

@@ -66,8 +66,8 @@ class Caps:
     """
 
     max_chunk_bytes: int = 32 << 20
-    max_total_bytes: int = 256 << 20
-    max_records: int = 2_000_000
+    max_total_bytes: int = 2 << 30
+    max_records: int = 50_000_000
     max_chunks: int = 100_000
 
     def __post_init__(self) -> None:
@@ -200,6 +200,8 @@ def _open(stream) -> SeekingReader:
 
 
 def _mib(count: int) -> str:
+    if count % (1 << 30) == 0:
+        return f"{count >> 30} GiB"
     return f"{count >> 20} MiB" if count % (1 << 20) == 0 else f"{count} bytes"
 
 
@@ -244,8 +246,9 @@ def _check_caps(stream, summary, caps: Caps) -> None:
     """Raise ``ReadCapError`` if reading the chunks ``mcap`` is about to read would pass a limit.
 
     It looks at exactly the chunks the reader will: those the summary indexes, or, with no index,
-    every record of the data section. A problem that is not a limit (a bad record, a corrupt
-    frame) is left to the reader, which reports it in its own words.
+    every record of the data section. Only the current chunk is held; the totals are counts, so
+    the total cap bounds time and not memory. A problem that is not a limit (a bad record, a
+    corrupt frame) is left to the reader, which reports it in its own words.
     """
     meter = _Meter(caps)
     size = stream.seek(0, os.SEEK_END)

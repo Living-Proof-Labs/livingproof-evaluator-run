@@ -207,20 +207,24 @@ the chunks it is about to read against these limits and fails closed when one is
 | Limit | Default |
 | --- | --- |
 | one chunk, decompressed | 32 MiB |
-| all chunks, decompressed | 256 MiB |
-| records inside chunks (messages, channels, schemas) | 2,000,000 |
+| all chunks, decompressed | 2 GiB |
+| records inside chunks (messages, channels, schemas) | 50,000,000 |
 | chunks | 100,000 |
 
 A value equal to a limit is read; one over it is not. The recording is then not read at all:
 the trial gets one `mcap-incomplete` finding that says it expands past the evaluator's size limit
-when decompressed, with no channel findings and no crash. A chunk header's own size is not
-trusted, because the decompressor ignores it when the compressed frame states another size, so
-each chunk is decompressed into a buffer no larger than the per-chunk limit and counted as it is.
-The limits are on bytes and counts and not on a timer, so a slow machine gives the same answer.
-They are far above a real recording (the real fixture, a 50 Hz trial, is one chunk of 443 KB
-decompressed holding 1,122 records, in a 120 KB file) and are values of `mcap_reader.Caps`, not
-options of the command line. The compressed file is still hashed in full against `media.json`; the limits do not
-cap its size on disk.
+when decompressed, with no channel findings and no crash. A named finding for this is
+[livingproof-evaluator#42](https://github.com/Living-Proof-Labs/livingproof-evaluator/issues/42)
+(owned by Rivet); recording 1.1.0 will not emit `mcap-incomplete`, and adoption of that contract
+should use the named finding once it exists. A chunk header's own size is not trusted, because the
+decompressor ignores it when the compressed frame states another size, so each chunk is
+decompressed into a buffer no larger than the per-chunk limit and counted as it is. The reader
+streams one chunk at a time, so the total cap bounds time and not memory. The limits are on bytes
+and counts and not on a timer, so a slow machine gives the same answer. They are far above a real
+recording (the real fixture, a 50 Hz trial, is one chunk of 443 KB decompressed holding 1,122
+records, in a 120 KB file) and are values of `mcap_reader.Caps`, not options of the command line.
+If an override is ever needed, it goes under `plan.recording.*`. The compressed file is still
+hashed in full against `media.json`; the limits do not cap its size on disk.
 
 **What runs today, and what waits.** Run by hand with `--media` on a downloaded media artifact,
 the check works as above once the evidence declares a gap limit. In the capability-verifier
