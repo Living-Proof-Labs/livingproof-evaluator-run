@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from livingproof_evaluator_run import pins
+from livingproof_evaluator_run.plain import is_plain, plain
 from livingproof_evaluator_run.identity import (
     CHECK_ID,
     CHECK_VERSION,
@@ -219,8 +221,12 @@ def _completeness(findings: list[dict], complete: int, planned: int) -> Report:
 
 
 def _pins(outcome: pins.PinsOutcome | None) -> Report:
-    """pins 1.0.0. Without a lock to compare against it is not applicable, never a pass."""
-    if outcome is None:
+    """pins 1.0.0. If nothing could be compared it is not applicable, never a pass.
+
+    That is no lock in the evidence, a lock that declares nothing the run recorded, or a run
+    that recorded nothing the lock declares: success and 100 would be a pass nothing earned.
+    """
+    if outcome is None or not outcome.compared:
         check = {
             "id": pins.PINS_ID,
             "version": pins.PINS_VERSION,
@@ -228,7 +234,8 @@ def _pins(outcome: pins.PinsOutcome | None) -> Report:
             "success": True,
             "findings": [],
         }
-        return Report(check)
+        notes = [f"Not checked: {', '.join(outcome.not_checked)}."] if outcome else []
+        return Report(check, notes=notes)
     findings = outcome.findings
     check = {
         "id": pins.PINS_ID,
@@ -287,7 +294,13 @@ def _write_result(
         "icon_accessible_name": DISPLAY_NAME,
     }
     notes = " ".join(note for report in reports for note in report.notes)
-    shown = [item for report in reports for item in report.shown][:50]
+    # Text copied out of evidence is escaped, so the descriptor matches the contract's
+    # plain-text pattern whatever the evidence holds.
+    shown = [
+        {key: plain(value) if isinstance(value, str) else value for key, value in item.items()}
+        for report in reports
+        for item in report.shown
+    ][:50]
     if success:
         parts = [report.success_copy for report in reports if report.success_copy] + (
             [notes] if notes else []
@@ -316,7 +329,30 @@ def _write_result(
         "integrity": {"run": run, "trials": trials, "checks": checks},
         "descriptor": descriptor,
     }
+    refused = _not_plain(descriptor)
+    if refused:
+        # Never write a result the contract would reject and report success.
+        print(
+            f"livingproof-evaluator-run: descriptor text is not plain text ({refused}); "
+            "no result written",
+            file=sys.stderr,
+        )
+        return 1
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, indent=2) + "\n")
     return 0
+
+
+def _not_plain(descriptor: dict) -> str | None:
+    """The first descriptor field whose text the contract's plain-text pattern refuses."""
+    for key, value in descriptor.items():
+        if key == "icon":
+            continue
+        if isinstance(value, str) and not is_plain(value):
+            return key
+    for index, item in enumerate(descriptor.get("findings", [])):
+        for key, value in item.items():
+            if isinstance(value, str) and not is_plain(value):
+                return f"findings[{index}].{key}"
+    return None

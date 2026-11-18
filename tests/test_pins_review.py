@@ -1,8 +1,9 @@
 """Reviewer coverage for pins 1.0.0 (livingproof-evaluator-run#5, PR 9).
 
-Scripted from Vera's hand probes at head 4e895df. Everything here passes on that head except
-the two tests marked ``xfail(strict=True)``: they record two gaps found in review. When the
-gap is fixed the strict xfail turns into a failure that says to delete the marker.
+Scripted from Vera's hand probes at head 4e895df. Two gaps found in review were first recorded
+here as strict xfails and are fixed now: (a) a recorded value with a control character or < >
+is shown escaped, so the result conforms, and (b) a check that compared nothing is not
+applicable. The markers are gone; both tests pass as plain tests.
 """
 
 from __future__ import annotations
@@ -126,11 +127,6 @@ def test_a_recorded_adapter_commit_alone_is_enough_to_check_the_runner(tmp_path:
     assert [f["subject"] for f in pins["findings"]] == ["runner"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Gap 1 (review of PR 9): a recorded value with a control character or < > is copied "
-    "into finding and descriptor text, so the result no longer validates against the v1.0.8 kit.",
-)
 @pytest.mark.parametrize("bad", ["abc\n", "a\tb", "<b>x</b>", "a\x00b"], ids=repr)
 def test_odd_characters_in_a_recorded_value_still_give_a_conforming_result(
     tmp_path: Path, bad: str
@@ -142,11 +138,6 @@ def test_odd_characters_in_a_recorded_value_still_give_a_conforming_result(
     assert base._validate(document) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Gap 2 (review of PR 9): when no subject could be compared the check still reports "
-    "applicable, success and 100, which is a pass that nothing earned (decision 5 in the PR).",
-)
 @pytest.mark.parametrize("case", ["empty-lock", "empty-lock-fields", "nothing-recorded"])
 def test_a_check_that_compared_nothing_is_not_a_pass(tmp_path: Path, case: str) -> None:
     folder = _copy(tmp_path)
@@ -170,4 +161,17 @@ def test_a_check_that_compared_nothing_is_not_a_pass(tmp_path: Path, case: str) 
         (folder / "run-manifest.json").unlink()
     document, pins = _result(folder, tmp_path)
     assert pins["applicable"] is False
+    assert base._validate(document) == []
+
+
+def test_a_check_that_compared_nothing_says_what_was_not_checked(tmp_path: Path) -> None:
+    folder = _copy(tmp_path)
+    _edit(folder / "manifest.json", lambda d: d["lock"].update(content={}))
+    document, pins = _result(folder, tmp_path)
+    assert pins["applicable"] is False
+    assert "percentage" not in pins
+    assert pins["findings"] == []
+    copy = document["descriptor"]["success_copy"]
+    assert "Not checked: specs, runner, verifier, world, configuration." in copy
+    assert document["integrity"]["run"]["percentage"] == 100
     assert base._validate(document) == []

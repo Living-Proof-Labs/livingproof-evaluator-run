@@ -17,6 +17,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from livingproof_evaluator_run.plain import shown
+
 PINS_ID = "pins"
 PINS_VERSION = "1.0.0"
 # The order of the contract's ``subject`` enum.
@@ -61,6 +63,11 @@ class PinsOutcome:
         return found
 
     @property
+    def compared(self) -> bool:
+        """True when at least one subject had both a declared and a recorded pin."""
+        return any(c.checked for c in self.comparisons)
+
+    @property
     def matched(self) -> list[str]:
         return [c.subject for c in self.comparisons if c.checked and not c.differing]
 
@@ -76,10 +83,11 @@ class PinsOutcome:
 
 
 def _summary(item: Comparison) -> str:
-    seen = "; ".join(f"{value} ({name})" for name, value in item.differing.items())
+    # Both sides come from the evidence, so they are shown escaped and bounded (see plain.py).
+    seen = "; ".join(f"{shown(value)} ({name})" for name, value in item.differing.items())
     return (
-        f"The {item.subject} pin differs: the verification lock declares {item.declared}, "
-        f"the run recorded {seen}."
+        f"The {item.subject} pin differs: the verification lock declares "
+        f"{shown(item.declared)}, the run recorded {seen}."
     )
 
 
