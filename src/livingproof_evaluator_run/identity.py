@@ -1,4 +1,4 @@
-"""Publisher identity from the livingproof-evaluator v1.0.8 contract examples."""
+"""Publisher identity from the livingproof-evaluator v1.1.0 contract examples."""
 
 from __future__ import annotations
 

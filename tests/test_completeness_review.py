@@ -66,7 +66,7 @@ def test_request_trial_without_observations_is_missing_observations(tmp_path):
 def _no_planned_outcome(run) -> None:
     """No planned trials: a conforming ERROR result, or a clean refusal with no result.
 
-    The v1.0.8 kit requires a non-empty integrity.trials, so refusing (non-zero
+    The v1.1.0 kit requires a non-empty integrity.trials, so refusing (non-zero
     exit or SystemExit, no document) is acceptable. COMPLETED, a non-conforming
     document, or an unhandled exception is not.
     """

@@ -1,0 +1,33 @@
+{
+  "format": "livingproof-hallway-evidence/2.0.0",
+  "run_id": "fixture-plan-conformance-unmet",
+  "lock": {
+    "path": "lock.json",
+    "content": {
+      "scenario": "walk-hallway",
+      "plan": {
+        "trials": {
+          "count": 3
+        },
+        "command_speed": 0.5
+      }
+    }
+  },
+  "plan": {
+    "trials": {
+      "count": 3
+    },
+    "command_speed": 0.5
+  },
+  "preconditions": [
+    {
+      "name": "scenario_supported",
+      "met": false,
+      "detail": "walk-hallway is not named by the robot manifest scenarios"
+    }
+  ],
+  "trials": {
+    "count": 3,
+    "results": []
+  }
+}

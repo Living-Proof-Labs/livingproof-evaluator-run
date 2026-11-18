@@ -6,7 +6,7 @@ verify run 44253837813, Go1 playground corner-left): ``manifest.json``, the
 recorded value (or the value the embedded lock declares) in a copy of it. The
 doctored runs are synthetic: the run itself was not wrong.
 
-Results must conform to the livingproof-evaluator v1.0.8 conformance kit, name the
+Results must conform to the livingproof-evaluator v1.1.0 conformance kit, name the
 declared and the recorded value, and never carry a robot verdict.
 """
 
@@ -82,7 +82,11 @@ def test_good_run_matches_its_lock_and_lists_what_was_not_checked(tmp_path: Path
 
 def test_completeness_is_still_reported_first(tmp_path: Path) -> None:
     document = _run(GOOD, tmp_path)
-    assert [c["id"] for c in document["integrity"]["checks"]] == ["completeness", "pins"]
+    assert [c["id"] for c in document["integrity"]["checks"]] == [
+        "completeness",
+        "pins",
+        "plan-conformance",
+    ]
 
 
 def _world(doc: dict) -> None:

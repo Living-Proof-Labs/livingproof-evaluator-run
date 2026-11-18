@@ -1,0 +1,59 @@
+{
+  "format": "livingproof-hallway-evidence/2.0.0",
+  "run_id": "fixture-plan-conformance-findings",
+  "lock": {
+    "path": "lock.json",
+    "content": {
+      "scenario": "walk-hallway",
+      "plan": {
+        "trials": {
+          "count": 4
+        },
+        "command_speed": 2.0
+      }
+    }
+  },
+  "plan": {
+    "trials": {
+      "count": 5
+    },
+    "command_speed": 1.0
+  },
+  "preconditions": [
+    {
+      "name": "scenario_supported",
+      "met": true,
+      "detail": "walk-hallway"
+    }
+  ],
+  "trials": {
+    "count": 6,
+    "results": [
+      {
+        "index": 1,
+        "path": "trials/trial-01.json",
+        "sha256": "6259fc44635a34baae181e3ecebe841cd48c2bfbb76aef89ba0285cfcea4f8ef"
+      },
+      {
+        "index": 2,
+        "path": "trials/trial-02.json",
+        "sha256": "413d428cef5daecba9ee7f4438728b0dc46a7ca62402e62f79f7e14b60350675"
+      },
+      {
+        "index": 2,
+        "path": "trials/trial-02.json",
+        "sha256": "413d428cef5daecba9ee7f4438728b0dc46a7ca62402e62f79f7e14b60350675"
+      },
+      {
+        "index": 4,
+        "path": "trials/trial-03.json",
+        "sha256": "18ec7b094ed9997fdaed1d2098ff2bdd2d4a15d63800e3618bc3d3b868b4a908"
+      },
+      {
+        "index": 7,
+        "path": "trials/trial-07.json",
+        "sha256": "f0a5f0c7f17c61f6ff2dba487ff0ae52e604d2b34dca02cf4b3e59b8185806e3"
+      }
+    ]
+  }
+}

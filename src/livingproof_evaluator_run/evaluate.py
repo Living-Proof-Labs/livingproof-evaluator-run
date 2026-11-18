@@ -1,4 +1,4 @@
-"""Evaluate completeness 1.0.0 and pins 1.0.0 on hallway evidence or an integrity request."""
+"""Evaluate completeness, pins and plan-conformance (all 1.0.0) on evidence or a request."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from livingproof_evaluator_run import pins
+from livingproof_evaluator_run import pins, plan_conformance
 from livingproof_evaluator_run.plain import (
     DESCRIPTOR_LIMITS,
     FINDING_LIMITS,
@@ -62,7 +62,8 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
     for index in range(1, planned + 1):
         trial_id = f"trial-{index:02d}"
         entry = results.get(index)
-        path = manifest_path.parent / entry["path"] if entry and entry.get("path") else None
+        recorded = entry.get("path") if entry else None
+        path = manifest_path.parent / recorded if isinstance(recorded, str) and recorded else None
         if entry is None or path is None or not path.is_file():
             findings.append(
                 _finding(
@@ -89,6 +90,7 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
     reports = [_completeness(findings, complete, planned)]
     outcome = pins.from_evidence(manifest, manifest_path)
     reports.append(_pins(outcome))
+    reports.append(_plan_conformance(plan_conformance.from_evidence(manifest)))
     return _write_result(
         out,
         run_id=str(manifest.get("run_id") or "run"),
@@ -154,6 +156,7 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     inputs = list(request.get("inputs") or [])
     reports = [_completeness(findings, complete, len(planned))]
     reports.append(_pins(pins.from_request(payload)))
+    reports.append(_plan_conformance(plan_conformance.from_request(payload)))
     return _write_result(
         out,
         run_id=str(manifest.get("id") or "run"),
@@ -262,6 +265,35 @@ def _pins(outcome: pins.PinsOutcome | None) -> Report:
         {"text": _clip(item["summary"], 280), "severity": "Needs attention"} for item in findings
     ]
     return Report(check, success_copy=success, notes=notes, shown=shown)
+
+
+def _plan_conformance(outcome: plan_conformance.Outcome) -> Report:
+    """plan-conformance 1.0.0. Nothing compared is not applicable, never a pass.
+
+    Its findings carry no trial id (a missing trial file is a completeness finding), so the
+    descriptor's findings name no trial either.
+    """
+    check = {
+        "id": plan_conformance.PLAN_CONFORMANCE_ID,
+        "version": plan_conformance.PLAN_CONFORMANCE_VERSION,
+        "applicable": outcome.applicable,
+        "success": not outcome.findings,
+    }
+    if outcome.applicable:
+        check["percentage"] = outcome.percentage
+    check["findings"] = outcome.findings
+    if not outcome.applicable or outcome.findings:
+        shown = [
+            {"text": _clip(item["summary"], 280), "severity": "Needs attention"}
+            for item in outcome.findings
+        ]
+        return Report(check, notes=outcome.notes, shown=shown)
+    agree = "The plan, the trials and the lock" if outcome.with_lock else "The plan and the trials"
+    return Report(
+        check,
+        success_copy=f"{agree} agree on the trial count.",
+        notes=outcome.notes,
+    )
 
 
 def _clip(text: str, limit: int) -> str:
