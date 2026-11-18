@@ -229,3 +229,38 @@ def test_present_blank_trial_id_also_fails_closed(
     assert main([str(source), "--out", str(out)]) == 1
     assert not out.exists()
     assert "not plain text" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "trial_ids",
+    [
+        [""] + [f"trial-{index:03d}" for index in range(MAX_FINDINGS)],
+        [f"trial-{index:03d}" for index in range(MAX_FINDINGS)] + [""],
+        [f"trial-{index:03d}" for index in range(MAX_FINDINGS - 1)] + [""],
+    ],
+)
+def test_empty_trial_id_past_the_cap_exits_2_with_nothing_written(
+    tmp_path: Path, trial_ids: list[str]
+) -> None:
+    out = tmp_path / "result.json"
+    assert main([str(_request(tmp_path, trial_ids)), "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("blank", ["   ", "​"])
+@pytest.mark.parametrize(
+    "ids_before",
+    [MAX_FINDINGS - 1, MAX_FINDINGS],
+    ids=["50th-with-pins-overflow", "51st"],
+)
+def test_blank_trial_id_past_the_cap_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], blank: str, ids_before: int
+) -> None:
+    # A non-plain id at or past the 50th completeness finding is dropped from the
+    # descriptor once pin findings overflow the cap (or when it is the 51st trial).
+    # Fail closed either way, with nothing written.
+    out = tmp_path / "result.json"
+    ids = [f"trial-{index:03d}" for index in range(ids_before)] + [blank]
+    assert main([str(_request(tmp_path, ids)), "--out", str(out)]) == 1
+    assert not out.exists()
+    assert "not plain text" in capsys.readouterr().err

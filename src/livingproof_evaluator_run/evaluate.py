@@ -178,10 +178,12 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     reports.append(_pins(pins.from_request(payload)))
     reports.append(_plan_conformance(plan_conformance.from_request(payload)))
     reports.append(_termination(termination.from_request(payload)))
-    in_descriptor = [
-        item["trial_id"]
-        for item in (findings[: MAX_FINDINGS - 1] if len(findings) > MAX_FINDINGS else findings)
-    ]
+    # Overflow counts every descriptor finding, including pins, plan-conformance
+    # and termination, so a non-plain trial id at the 50th completeness slot can
+    # be dropped from the descriptor.
+    shown_items = [item for report in reports for item in report.shown]
+    visible = shown_items[: MAX_FINDINGS - 1] if len(shown_items) > MAX_FINDINGS else shown_items
+    in_descriptor = [item["trial"] for item in visible if "trial" in item]
     if any(not is_plain(plain(tid)) for tid in planned) and not any(
         not is_plain(plain(tid)) for tid in in_descriptor
     ):
