@@ -132,7 +132,7 @@ def test_good_run_ends_cleanly(tmp_path: Path) -> None:
     document, check = _doctored(tmp_path, lambda folder: None)
     assert check == {
         "id": CHECK,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": True,
         "success": True,
         "percentage": 100,
@@ -208,7 +208,8 @@ def test_the_vocabulary_and_categories_are_the_contracts() -> None:
     assert set(termination.STOP_REASONS) == VOCABULARY
     enum = schema["properties"]["findings"]["items"]["properties"]["category"]["enum"]
     assert sorted(termination.CATEGORIES) == sorted(enum)
-    assert schema["properties"]["version"]["const"] == termination.TERMINATION_VERSION
+    assert termination.TERMINATION_VERSION in schema["properties"]["version"]["enum"]
+    assert termination.TERMINATION_VERSION == "1.1.0"
     assert termination.TERMINATION_ID == CHECK
     assert '"termination"' in (base.CONTRACT / "schema/integrity/checks/registry.json").read_text()
 
@@ -225,13 +226,13 @@ def test_the_default_allowed_list_excludes_simulation_broken() -> None:
 
 
 def test_a_broken_simulation_is_a_finding_under_the_default(tmp_path: Path) -> None:
-    """non_finite_state is simulation-broken, and the default plan does not allow it."""
+    """non_finite_state is simulation-broken, which termination 1.1.0 never allows."""
     document, check = _doctored(tmp_path, lambda f: _set_end(f, 2, "non_finite_state"))
     assert [(i["category"], i["trial_id"], i["summary"]) for i in check["findings"]] == [
         (
             "disallowed-stop-reason",
             "trial-02",
-            "The stop reason simulation-broken is not one the plan allows.",
+            "The stop reason simulation-broken is never allowed.",
         )
     ]
     assert check["success"] is False
@@ -261,15 +262,31 @@ def _declare(reasons: object, where: str = "plan"):
     return change
 
 
-def test_a_plan_that_allows_simulation_broken_makes_it_clean(tmp_path: Path) -> None:
+def test_a_plan_cannot_allow_simulation_broken(tmp_path: Path) -> None:
+    """From termination 1.1.0 a plan cannot allow a broken simulation: it is a finding whatever
+    the plan lists (livingproof-evaluator#34). 1.0.0 let a plan list it."""
+
     def change(folder: Path) -> None:
         _set_end(folder, 2, "non_finite_state")
         _declare(DEFAULT_ALLOWED + ["simulation-broken"])(folder)
 
     document, check = _doctored(tmp_path, change)
-    assert check["success"] is True
-    assert check["findings"] == []
-    assert base._validate(document) == []
+    assert check["success"] is False
+    assert [(i["category"], i["trial_id"], i["summary"]) for i in check["findings"]] == [
+        (
+            "disallowed-stop-reason",
+            "trial-02",
+            "The stop reason simulation-broken is never allowed.",
+        )
+    ]
+    assert check["version"] == "1.1.0"
+    _conforming_error(document)
+
+
+def test_a_plan_that_lists_only_simulation_broken_allows_nothing(tmp_path: Path) -> None:
+    _, check = _doctored(tmp_path, _declare(["simulation-broken"]))
+    assert [i["category"] for i in check["findings"]] == ["disallowed-stop-reason"] * 3
+    assert check["percentage"] == 0
 
 
 def test_a_plan_list_replaces_the_default(tmp_path: Path) -> None:
@@ -288,18 +305,17 @@ def test_a_plan_list_replaces_the_default(tmp_path: Path) -> None:
 
 def test_the_lock_plan_is_the_fallback_and_the_manifest_plan_wins(tmp_path: Path) -> None:
     def from_lock(folder: Path) -> None:
-        _set_end(folder, 2, "non_finite_state")
-        _declare(DEFAULT_ALLOWED + ["simulation-broken"], "lock")(folder)
+        _declare(["mission-done"], "lock")(folder)
 
     _, check = _doctored(tmp_path / "lock", from_lock)
-    assert check["success"] is True
+    assert [i["trial_id"] for i in check["findings"]] == ["trial-02", "trial-03"]
 
     def both(folder: Path) -> None:
         from_lock(folder)
         _declare(DEFAULT_ALLOWED)(folder)
 
     _, check = _doctored(tmp_path / "both", both)
-    assert _categories(check) == ["disallowed-stop-reason"]
+    assert check["success"] is True
 
 
 @pytest.mark.parametrize("bad", [[], "mission-done", ["bogus"], [1, None], {"a": 1}, 5])
@@ -320,8 +336,7 @@ def test_a_declaration_that_names_no_known_reason_falls_back_to_the_default(
 
 def test_unknown_names_in_a_declaration_are_ignored(tmp_path: Path) -> None:
     def change(folder: Path) -> None:
-        _set_end(folder, 2, "non_finite_state")
-        _declare(["mission-done", "left-world", "time-limit", "bogus", "simulation-broken"])(folder)
+        _declare(["mission-done", "left-world", "time-limit", "bogus"])(folder)
 
     _, check = _doctored(tmp_path, change)
     assert check["success"] is True
@@ -483,7 +498,7 @@ def test_no_readable_trial_means_not_applicable(tmp_path: Path) -> None:
     document, check = _doctored(tmp_path, change)
     assert check == {
         "id": CHECK,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": False,
         "success": True,
         "findings": [],
@@ -545,12 +560,20 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("name", ["clean", "findings", "timeout-single-report"])
+def _as_1_1_0(check: dict) -> dict:
+    """The contract keeps its 1.0.0 examples as published. A 1.0.0 termination check read as
+    1.1.0 changes only its version, when no plan lists simulation-broken."""
+    return {**check, "version": "1.1.0"} if check["version"] == "1.0.0" else check
+
+
+@pytest.mark.parametrize(
+    "name", ["clean", "findings", "timeout-single-report", "simulation-broken"]
+)
 def test_the_contract_examples_give_the_contract_checks(name: str, tmp_path: Path) -> None:
     document = _run_request(_request(name), tmp_path)
     expected = json.loads((EXAMPLES / name / "result.json").read_text(encoding="utf-8"))
     for check in _checks(expected):
-        assert _check(document, check["id"]) == check
+        assert _check(document, check["id"]) == _as_1_1_0(check)
     assert document["integrity"]["trials"] == expected["integrity"]["trials"]
     assert base._validate(document) == []
 
@@ -669,7 +692,10 @@ def _random_request(rng: random.Random) -> dict:
     }
 
 
-def test_ours_equal_the_contract_reference_rules() -> None:
+@pytest.mark.parametrize("version", ["1.1.0", "1.0.0"])
+def test_ours_equal_the_contract_reference_rules(version: str) -> None:
+    """Both versions the contract keeps valid, each against the reference rule of that version.
+    The reference defaults to 1.1.0, so the version is always passed (livingproof-evaluator#34)."""
     sys.path.insert(0, str(base.CONTRACT / "tests"))
     import integrity_rules
 
@@ -677,11 +703,12 @@ def test_ours_equal_the_contract_reference_rules() -> None:
 
     rng = random.Random(7)
     seen: set[str] = set()
-    referred = judged_none = 0
+    referred = judged_none = broken = 0
     for _ in range(600):
         request = _random_request(rng)
-        expected = integrity_rules.termination(request, VOCABULARY)
-        outcome = termination.from_request(request)
+        expected = integrity_rules.termination(request, VOCABULARY, version)
+        outcome = termination.from_request(request, version)
+        assert outcome.version == version
         assert outcome.applicable is expected["applicable"], request
         assert outcome.findings == expected["findings"], request
         assert outcome.referrals == expected["referrals"], request
@@ -691,9 +718,27 @@ def test_ours_equal_the_contract_reference_rules() -> None:
             judged_none += 1
         referred += bool(expected["referrals"])
         seen.update(item["category"] for item in expected["findings"])
+        broken += any("simulation-broken" in item["summary"] for item in expected["findings"])
     assert seen == set(termination.CATEGORIES)
     assert referred > 50
     assert judged_none > 5
+    assert broken > 20
+
+
+def test_the_default_version_is_the_current_one_and_is_the_references_default() -> None:
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    from livingproof_evaluator_run import termination
+
+    rng = random.Random(11)
+    assert termination.TERMINATION_VERSION == "1.1.0"
+    for _ in range(100):
+        request = _random_request(rng)
+        assert (
+            termination.from_request(request).findings
+            == integrity_rules.termination(request, VOCABULARY)["findings"]
+        )
 
 
 def test_left_world_from_a_route_observation_maps_to_the_contracts_left_world(

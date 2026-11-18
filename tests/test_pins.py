@@ -1,4 +1,4 @@
-"""pins 1.0.0 (livingproof-evaluator-run#5).
+"""pins 1.1.0 (livingproof-evaluator-run#5, adopted at 1.1.0 in #18).
 
 The good fixture is the evidence folder of a real run (livingproof-verification
 verify run 44253837813, Go1 playground corner-left): ``manifest.json``, the
@@ -64,11 +64,17 @@ def _conforming_error(document: dict) -> None:
 def test_good_run_matches_its_lock_and_lists_what_was_not_checked(tmp_path: Path) -> None:
     document = _run(GOOD, tmp_path)
     pins = _check(document, "pins")
-    assert pins["version"] == "1.0.0"
+    assert pins["version"] == "1.1.0"
     assert pins["applicable"] is True
     assert pins["success"] is True
     assert pins["percentage"] == 100
     assert pins["findings"] == []
+    # The lock declares a specs file list and a verifier image digest. The run recorded neither
+    # (livingproof-sim-mujoco#104, capability-verifier#153), so they are not-recorded.
+    assert pins["not_checked"] == [
+        {"subject": "specs", "reason": "not-recorded"},
+        {"subject": "verifier", "reason": "not-recorded"},
+    ]
     assert document["integrity"]["run"]["test_system_status"] == "COMPLETED"
     assert "conclusion" not in document["integrity"]["run"]
     # Today's evidence records no spec file digests and no verifier image digest.
@@ -146,8 +152,9 @@ def test_doctored_value_is_one_hash_mismatch_on_its_subject(
     assert finding["classification"] == "test_system"
     assert "trial_id" not in finding
     assert value in finding["summary"]
-    # Two of the three checkable subjects still match, of five: 2/5.
-    assert pins["percentage"] == 40
+    # Two of the three checked subjects still match. The two not checked are outside the
+    # denominator (1.0.0 divided by five and read 40).
+    assert pins["percentage"] == pytest.approx(100 * 2 / 3)
     assert document["integrity"]["run"]["percentage"] == 40
     _conforming_error(document)
     # The completeness check is untouched.
@@ -194,6 +201,11 @@ def test_world_without_a_recorded_digest_is_not_checked(tmp_path: Path) -> None:
     assert pins["success"] is True
     assert pins["findings"] == []
     assert "Not checked: specs, verifier, world" in document["descriptor"]["success_copy"]
+    assert {i["subject"]: i["reason"] for i in pins["not_checked"]} == {
+        "specs": "not-recorded",
+        "verifier": "not-recorded",
+        "world": "not-recorded",
+    }
     assert base._validate(document) == []
 
 
@@ -224,9 +236,13 @@ def test_unrecorded_configuration_and_runner_are_not_checked(tmp_path: Path) -> 
     pins = _check(document, "pins")
     assert pins["findings"] == []
     copy = document["descriptor"]["success_copy"]
-    assert copy.endswith("Not checked: specs, runner, verifier, configuration.") or (
-        "Not checked: specs, runner, verifier, configuration" in copy
-    )
+    assert "Not checked: specs, runner, verifier, configuration." in copy
+    assert {i["subject"]: i["reason"] for i in pins["not_checked"]} == {
+        "specs": "not-recorded",
+        "runner": "not-recorded",
+        "verifier": "not-recorded",
+        "configuration": "not-recorded",
+    }
 
 
 def test_a_lock_that_declares_nothing_for_a_subject_is_not_checked(tmp_path: Path) -> None:
@@ -239,8 +255,11 @@ def test_a_lock_that_declares_nothing_for_a_subject_is_not_checked(tmp_path: Pat
 
     _edit(folder / "manifest.json", strip)
     document = _run(folder, tmp_path)
-    assert _check(document, "pins")["findings"] == []
+    pins = _check(document, "pins")
+    assert pins["findings"] == []
     assert "world" in document["descriptor"]["success_copy"].split("Not checked")[1]
+    # The lock lacks it: not-declared, where a run that recorded nothing is not-recorded.
+    assert {"subject": "world", "reason": "not-declared"} in pins["not_checked"]
 
 
 def test_manifest_without_an_embedded_lock_has_nothing_to_compare(tmp_path: Path) -> None:
@@ -252,6 +271,12 @@ def test_manifest_without_an_embedded_lock_has_nothing_to_compare(tmp_path: Path
     assert pins["success"] is True
     assert "percentage" not in pins
     assert pins["findings"] == []
+    assert pins["version"] == "1.1.0"
+    # Nothing was checked, so every subject is listed. The lock declares none of them.
+    assert pins["not_checked"] == [
+        {"subject": s, "reason": "not-declared"}
+        for s in ("specs", "runner", "verifier", "world", "configuration")
+    ]
     # An inapplicable check does not lower the run percentage.
     assert document["integrity"]["run"]["percentage"] == 100
     assert base._validate(document) == []
@@ -263,7 +288,7 @@ def test_run_percentage_is_the_minimum_over_the_applicable_checks(tmp_path: Path
     (folder / "trials" / "trial-01.json").write_text("{}\n")  # completeness: digest mismatch
     document = _run(folder, tmp_path)
     assert _check(document, "completeness")["percentage"] == 0
-    assert _check(document, "pins")["percentage"] == 40
+    assert _check(document, "pins")["percentage"] == pytest.approx(100 * 2 / 3)
     assert document["integrity"]["run"]["percentage"] == 0
     _conforming_error(document)
     assert len(document["descriptor"]["findings"]) == 2
@@ -300,17 +325,54 @@ def _example(name: str, tmp_path: Path) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("name", ["pins", "pins-partial"])
+def _reference(name: str) -> dict:
+    import sys
+
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    request = json.loads((EXAMPLES / name / "request.json").read_text())
+    return integrity_rules.pins(request["integrity"])
+
+
+@pytest.mark.parametrize("name", ["pins", "pins-partial", "pins-not-checked", "pins-none-checked"])
 def test_contract_pins_examples_give_the_example_findings(tmp_path: Path, name: str) -> None:
     expected = json.loads((EXAMPLES / name / "result.json").read_text())
     want = [c for c in expected["integrity"]["checks"] if c["id"] == "pins"][0]
+    rule = _reference(name)
     document = _example(name, tmp_path)
     got = _check(document, "pins")
-    assert got["success"] is False
-    assert got["percentage"] == want["percentage"]
+    assert got["version"] == "1.1.0"
+    assert got["applicable"] is rule["applicable"]
+    assert got["success"] is (not rule["findings"])
+    assert got.get("percentage") == rule.get("percentage")
+    assert got["not_checked"] == rule["not_checked"]
     assert [f["subject"] for f in got["findings"]] == [f["subject"] for f in want["findings"]]
     assert all(f["category"] == "hash-mismatch" for f in got["findings"])
-    _conforming_error(document)
+    if want["version"] == "1.1.0":
+        # Only the summary text is ours.
+        strip = lambda c: {  # noqa: E731
+            **c,
+            "findings": [{k: v for k, v in f.items() if k != "summary"} for f in c["findings"]],
+        }
+        assert strip(got) == strip(want)
+    assert base._validate(document) == []
+
+
+@pytest.mark.parametrize("name", ["pins", "pins-partial"])
+def test_version_1_0_0_is_still_selectable_and_gives_the_published_example(name: str) -> None:
+    """1.0.0 divided by the five subjects, and had no ``not_checked``."""
+    from livingproof_evaluator_run import pins
+
+    expected = json.loads((EXAMPLES / name / "result.json").read_text())
+    want = [c for c in expected["integrity"]["checks"] if c["id"] == "pins"][0]
+    assert want["version"] == "1.0.0"
+    request = json.loads((EXAMPLES / name / "request.json").read_text())
+    outcome = pins.from_request(request["integrity"], "1.0.0")
+    assert outcome.version == "1.0.0"
+    assert outcome.percentage == want["percentage"]
+    assert [f["subject"] for f in outcome.findings] == [f["subject"] for f in want["findings"]]
+    assert outcome.not_checked is None
 
 
 def test_contract_clean_example_has_matching_pins(tmp_path: Path) -> None:

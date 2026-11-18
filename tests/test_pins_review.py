@@ -173,5 +173,7 @@ def test_a_check_that_compared_nothing_says_what_was_not_checked(tmp_path: Path)
     assert pins["findings"] == []
     copy = document["descriptor"]["success_copy"]
     assert "Not checked: specs, runner, verifier, world, configuration." in copy
+    assert {i["reason"] for i in pins["not_checked"]} == {"not-declared"}
+    assert len(pins["not_checked"]) == 5
     assert document["integrity"]["run"]["percentage"] == 100
     assert base._validate(document) == []
