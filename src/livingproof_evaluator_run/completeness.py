@@ -30,6 +30,11 @@ COMPLETENESS_VERSION = "1.1.0"
 PREVIOUS_VERSIONS = ("1.0.0",)
 SUCCESS_COPY = "Every planned trial has its observation file."
 
+CAP_SUMMARY = (
+    "Trial {id} has a truncated recording: it expands past the evaluator's size limit"
+    " when decompressed, so it was not read."
+)
+
 # The category and the words for a recording or observations that is not present.
 _RECORDING = {
     "missing": ("missing-recording", "Trial {id} has no recording."),
@@ -52,10 +57,18 @@ def finding(category: str, trial_id: str, summary: str) -> dict:
     }
 
 
-def recording_finding(trial_id: str, state: object) -> dict | None:
-    """The finding for a recording that is ``missing``, ``truncated`` or ``empty``, else None."""
+def recording_finding(trial_id: str, state: object, cap_exceeded: bool = False) -> dict | None:
+    """The finding for a recording that is ``missing``, ``truncated`` or ``empty``, else None.
+
+    ``cap_exceeded`` is a recording the reader refused for its size (``mcap_reader.Caps``): it
+    was not read, so it is ``truncated``, and the summary says why. The contract has no finding
+    named for it (livingproof-evaluator#42)."""
     found = _RECORDING.get(state) if isinstance(state, str) else None
-    return finding(found[0], trial_id, found[1].format(id=trial_id)) if found else None
+    if not found:
+        return None
+    if cap_exceeded and state == "truncated":
+        return finding(found[0], trial_id, CAP_SUMMARY.format(id=trial_id))
+    return finding(found[0], trial_id, found[1].format(id=trial_id))
 
 
 def observations_finding(trial_id: str, state: object) -> dict | None:

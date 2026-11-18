@@ -230,6 +230,35 @@ result would hide a truncation that nothing reports. The published 1.0.0 `record
 request is such a request and is rejected at 1.1.0; it is still judged at 1.0.0 in the
 comparison tests.
 
+**Size limits (hostile recordings).** A recording comes from outside the evaluator, and a few
+kilobytes of compressed chunk can decompress to gigabytes: a 32 KB file that expands to 1 GiB
+took about 43 s and 1 GB of memory to read. Before it decompresses anything, the reader checks
+the chunks it is about to read against these limits and fails closed when one is passed:
+
+| Limit | Default |
+| --- | --- |
+| one chunk, decompressed | 32 MiB |
+| all chunks, decompressed | 2 GiB |
+| records inside chunks (messages, channels, schemas) | 50,000,000 |
+| chunks | 100,000 |
+
+A value equal to a limit is read; one over it is not. The recording is then not read at all:
+at 1.1.0 it counts as truncated: `completeness` reports one `truncated-recording` finding that
+says it expands past the evaluator's size limit when decompressed, `recording` lists the trial
+`not-present`, and there are no channel findings and no crash (1.0.0 reported one `mcap-incomplete`
+finding). The contract has no finding named for this;
+[livingproof-evaluator#42](https://github.com/Living-Proof-Labs/livingproof-evaluator/issues/42)
+(owned by Rivet) asks for one, and adoption of that should use it once it exists. A chunk
+header's own size is not trusted, because the
+decompressor ignores it when the compressed frame states another size, so each chunk is
+decompressed into a buffer no larger than the per-chunk limit and counted as it is. The reader
+streams one chunk at a time, so the total cap bounds time and not memory. The limits are on bytes
+and counts and not on a timer, so a slow machine gives the same answer. They are far above a real
+recording (the real fixture, a 50 Hz trial, is one chunk of 443 KB decompressed holding 1,122
+records, in a 120 KB file) and are values of `mcap_reader.Caps`, not options of the command line.
+If an override is ever needed, it goes under `plan.recording.*`. The compressed file is still
+hashed in full against `media.json`; the limits do not cap its size on disk.
+
 **What runs today, and what waits.** Run by hand with `--media` on a downloaded media artifact,
 the check works as above once the evidence declares a gap limit. In the capability-verifier
 workflow it cannot: the `run-integrity` job needs only `plan` and `evidence`, so it is not given

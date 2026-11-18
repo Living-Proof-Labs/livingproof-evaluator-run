@@ -273,10 +273,15 @@ def test_the_reader_imports_nothing_of_the_check_or_the_result() -> None:
         "__future__",
         "array",
         "dataclasses",
+        "io",
+        "lz4",
         "mcap",
+        "os",
         "pathlib",
         "collections",
+        "struct",
         "typing",
+        "zstandard",
     }
 
 

@@ -65,6 +65,14 @@ from livingproof_evaluator_run.plain import shown
 RECORDING_ID = "recording"
 RECORDING_VERSION = "1.1.0"
 PREVIOUS_VERSIONS = ("1.0.0",)
+# What a 1.0.0 ``mcap-incomplete`` finding says when the reader refused the file for its size
+# (``mcap_reader.Caps``) instead of failing to open it. From 1.1.0 such a file is not readable,
+# so it is ``truncated`` and ``completeness`` reports it (``COMPLETENESS_CAP_SUMMARY`` says why);
+# this check lists the trial ``not-present``. The contract has no finding named for it
+# (livingproof-evaluator#42, owned by Rivet).
+CAP_SUMMARY = (
+    "The recording expands past the evaluator's size limit when decompressed, so it was not read."
+)
 # The contract's category enum, in the order the rules report them within a trial.
 CATEGORIES = (
     "mcap-incomplete",
@@ -110,6 +118,7 @@ class Trial:
     media_sha256: object
     media_observation_sha256: object
     evidence_observation_sha256: object
+    cap_exceeded: bool = False
 
 
 @dataclass
@@ -198,7 +207,9 @@ def judge(
             mine.append(
                 _finding(
                     "mcap-incomplete",
-                    "The recording does not open or has no valid footer and summary.",
+                    CAP_SUMMARY
+                    if trial.cap_exceeded
+                    else "The recording does not open or has no valid footer and summary.",
                     trial.id,
                 )
             )
@@ -460,6 +471,11 @@ class MediaRead:
         found = self.listed.get(index)
         return found.state if found else None
 
+    def cap_exceeded(self, index: int) -> bool:
+        """True when the reader refused the listed recording for its size, so it was not read."""
+        found = self.listed.get(index)
+        return bool(found and found.inspection and found.inspection.cap_exceeded)
+
 
 def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> MediaRead | None:
     """Read the recordings ``media.json`` lists for the planned trials that have trial evidence.
@@ -569,6 +585,7 @@ def from_evidence(
             Trial(
                 id=trial_id,
                 complete=inspection.complete,
+                cap_exceeded=inspection.cap_exceeded,
                 bytes=found.path.stat().st_size,
                 sha256=_digest(found.path),
                 channels=[

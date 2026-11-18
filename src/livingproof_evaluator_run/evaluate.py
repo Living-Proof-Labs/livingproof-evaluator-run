@@ -97,7 +97,11 @@ def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None)
         digest = _sha256(path)
         inputs.append(_input("observations", path, uri=str(entry["path"])))
         mine: list[dict] = []
-        found = completeness.recording_finding(trial_id, read.state(index) if read else None)
+        found = completeness.recording_finding(
+            trial_id,
+            read.state(index) if read else None,
+            cap_exceeded=bool(read and read.cap_exceeded(index)),
+        )
         if found:
             mine.append(found)
         expected = entry.get("sha256")
