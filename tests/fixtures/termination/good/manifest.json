@@ -1,0 +1,32 @@
+{
+  "format": "livingproof-hallway-evidence/2.0.0",
+  "run_id": "fixture-termination-good",
+  "plan": {
+    "trials": {
+      "count": 3
+    }
+  },
+  "trials": {
+    "count": 3,
+    "results": [
+      {
+        "index": 1,
+        "path": "trials/trial-01.json",
+        "sha256": "671535f68a40a8822acd8972094e74410b3077bbade59564666d0010ad4774f9",
+        "outcome": "crossed_exit"
+      },
+      {
+        "index": 2,
+        "path": "trials/trial-02.json",
+        "sha256": "531eb10ebb43c9dce1dc1129f73d7c8432a0ab134b2a8baddaa23267a16c26e4",
+        "outcome": "left_hallway"
+      },
+      {
+        "index": 3,
+        "path": "trials/trial-03.json",
+        "sha256": "345aad90c520d17a9f05bbf65ba4b0fab046128457955534f7f1adea4529bee4",
+        "outcome": "time_limit"
+      }
+    ]
+  }
+}

@@ -86,6 +86,7 @@ def test_completeness_is_still_reported_first(tmp_path: Path) -> None:
         "completeness",
         "pins",
         "plan-conformance",
+        "termination",
     ]
 
 
