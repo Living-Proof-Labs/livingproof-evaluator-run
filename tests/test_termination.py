@@ -691,3 +691,23 @@ def test_ours_equal_the_contract_reference_rules() -> None:
     assert seen == set(termination.CATEGORIES)
     assert referred > 50
     assert judged_none > 5
+
+
+def test_left_world_from_a_route_observation_maps_to_the_contracts_left_world(
+    tmp_path: Path,
+) -> None:
+    """Current sim-mujoco observe_route writes end='left_world' (test_walk_corner).
+
+    That is the contract's left-world, which the default allows. An unmapped
+    left_world would be reported as unknown-stop-reason, even on a clean leave.
+    """
+    document, check = _doctored(
+        tmp_path, lambda folder: _set_end(folder, 1, "left_world"), REAL
+    )
+    assert check["success"] is True
+    assert check["findings"] == []
+    from livingproof_evaluator_run import termination
+
+    assert termination.END_TO_STOP_REASON["left_world"] == "left-world"
+    assert "left-world" in termination.DEFAULT_ALLOWED_STOP_REASONS
+    assert base._validate(document) == []
