@@ -125,24 +125,36 @@ def test_a_decompression_bomb_stops_at_the_per_chunk_cap(tmp_path: Path) -> None
 
 
 def test_a_chunk_of_millions_of_tiny_records_is_refused_fast(tmp_path: Path) -> None:
-    """Under the byte limits (24 MiB, honestly declared) but 2.8 million records: the parse, not
-    the memory, is what would take the time."""
-    size = 24 << 20
-    data = bombs.mcap_with_chunk(bombs.empty_records_zstd(size), declared=size - size % 9)
+    """Each chunk is under 32 MiB and the total is under 2 GiB, but the records pass 50,000,000.
+
+    Fifteen chunks of 30 MiB of empty records are about 52.4 million records and 450 MiB
+    decompressed. The parse, not the memory, is what would take the time.
+    """
+    size = 30 << 20
+    declared = size - size % 9
+    data = bombs.mcap_with_chunks([(bombs.empty_records_zstd(size), declared)] * 15)
     result = _probe(bombs.write(tmp_path / "records.mcap", data))
-    _refused(result)
+    assert result["elapsed"] < 60, f"took {result['elapsed']:.1f} s"
+    assert result["rss_kb"] < RSS_KB, f"peaked at {result['rss_kb'] // 1024} MB"
+    assert result["complete"] is False
+    assert result["cap_exceeded"] is True
     assert "records" in result["reason"]
+    assert result["channels"] == 0
 
 
 def test_many_chunks_each_under_the_chunk_limit_are_refused_in_total(tmp_path: Path) -> None:
-    """Ten chunks of 30 MiB: each is allowed, together they are 300 MiB, over 256 MiB."""
+    """Seventy chunks of 30 MiB: each is allowed, together they are 2,100 MiB, over 2 GiB.
+
+    The reader streams one chunk at a time, so a file that expands past 2 GiB is refused
+    without holding memory that scales with the total cap.
+    """
     size = 30 << 20
-    data = bombs.mcap_with_chunks([(bombs.one_record_zstd(size), size)] * 10)
+    data = bombs.mcap_with_chunks([(bombs.one_record_zstd(size), size)] * 70)
     result = _probe(bombs.write(tmp_path / "many.mcap", data))
-    assert result["elapsed"] < SECONDS * 2, f"took {result['elapsed']:.1f} s"
+    assert result["elapsed"] < 60, f"took {result['elapsed']:.1f} s"
     assert result["cap_exceeded"] is True
     assert "in total" in result["reason"]
-    assert result["rss_kb"] < RSS_KB
+    assert result["rss_kb"] < RSS_KB, f"peaked at {result['rss_kb'] // 1024} MB"
 
 
 def test_messages_raises_a_read_limit_error_for_a_bomb(tmp_path: Path) -> None:
@@ -163,8 +175,8 @@ def test_the_defaults_are_the_documented_values() -> None:
     limits = mcap_reader.STANDARD_CAPS
     assert limits == mcap_reader.Caps(
         max_chunk_bytes=32 << 20,
-        max_total_bytes=256 << 20,
-        max_records=2_000_000,
+        max_total_bytes=2 << 30,
+        max_records=50_000_000,
         max_chunks=100_000,
     )
 
@@ -266,7 +278,7 @@ def test_the_limit_summary_is_short_enough_for_a_card() -> None:
 
 def test_the_docs_state_every_default() -> None:
     text = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
-    for needle in ("32 MiB", "256 MiB", "2,000,000", "100,000"):
+    for needle in ("32 MiB", "2 GiB", "50,000,000", "100,000"):
         assert needle in text, needle
     assert "decompress" in text and "fail" in text.lower()
 
