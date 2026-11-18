@@ -177,10 +177,10 @@ nothing here uses it.
 
 | Category | When |
 | --- | --- |
-| `mcap-incomplete` | the file does not open, or has no valid footer and summary, or a chunk fails its CRC |
+| `mcap-incomplete` | the file does not open, or has no valid footer and summary, or a chunk fails its CRC. It is the only finding for that cause: the channels of a file that could not be read are not also reported as `missing-channel` |
 | `missing-channel` | a required channel is absent or has no messages |
 | `timestamps-backwards` | a channel has a message earlier than the one before it (counted per channel) |
-| `message-gap-exceeded` | the largest gap between consecutive messages on a channel is over the limit |
+| `message-gap-exceeded` | the largest gap between consecutive messages on a channel, in log-time order, is over the limit. Messages written out of order are not a gap; they are `timestamps-backwards` |
 | `media-file-mismatch` | the file's size or sha256 differs from `media.json` |
 | `observation-link-mismatch` | `observation_sha256` in `media.json` differs from the run evidence |
 

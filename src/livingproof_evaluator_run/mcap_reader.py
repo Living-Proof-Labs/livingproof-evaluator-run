@@ -11,16 +11,19 @@ every chunk reads (CRCs are validated), and the messages can be read to the end.
 is incomplete with a ``reason``; ``inspect`` never raises on a bad file.
 
 Times are the messages' ``log_time`` in nanoseconds. Messages are read in the order they are
-stored, not sorted by time, so a timestamp that goes backwards stays visible.
+stored, not sorted by time, so a timestamp that goes backwards stays visible; only the gap is
+taken from the sorted times.
 
-A gap is the largest step forward between two consecutive messages of one channel, in file
-order. A step back is counted in ``backward_steps`` and is not a gap; equal times are neither.
+A gap is the largest step between two consecutive messages of one channel in log-time order, so
+messages written out of order are not a capture gap (livingproof-evaluator#34). A step back in
+file order is still counted in ``backward_steps``; equal times are neither a gap nor a step back.
 ``max_gap_seconds`` is ``max_gap_ns / 1e9``, the double nearest the decimal value, so a gap that
 equals a decimal limit such as 0.1 s compares equal to it.
 """
 
 from __future__ import annotations
 
+from array import array
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,28 +69,34 @@ class Inspection:
 def channel_stats(
     messages: Iterable[Message], topics: Iterable[str] = ()
 ) -> tuple[ChannelStats, ...]:
-    """Per-channel statistics for ``messages`` in the order given, sorted by topic.
+    """Per-channel statistics for ``messages``, sorted by topic.
+
+    ``backward_steps`` follows the order given; ``max_gap_ns`` follows log-time order.
 
     ``topics`` lists channels to report even when no message was seen (count 0).
     """
     count: dict[str, int] = {topic: 0 for topic in topics}
-    last: dict[str, int] = {}
+    times: dict[str, array] = {}
     backward: dict[str, int] = {}
-    gap: dict[str, int] = {}
     for message in messages:
         topic = message.topic
         count[topic] = count.get(topic, 0) + 1
-        if topic in last:
-            step = message.log_time - last[topic]
-            if step < 0:
-                backward[topic] = backward.get(topic, 0) + 1
-            elif step > gap.get(topic, 0):
-                gap[topic] = step
-        last[topic] = message.log_time
+        seen = times.setdefault(topic, array("Q"))
+        if seen and message.log_time < seen[-1]:
+            backward[topic] = backward.get(topic, 0) + 1
+        seen.append(message.log_time)
     return tuple(
-        ChannelStats(topic, count[topic], backward.get(topic, 0), gap.get(topic, 0))
+        ChannelStats(topic, count[topic], backward.get(topic, 0), _largest_step(times.get(topic)))
         for topic in sorted(count)
     )
+
+
+def _largest_step(times: array | None) -> int:
+    """The largest step between consecutive values of ``times`` once sorted, 0 for fewer than two."""
+    if times is None or len(times) < 2:
+        return 0
+    ordered = sorted(times)
+    return max(b - a for a, b in zip(ordered, ordered[1:], strict=False))
 
 
 def messages(path: Path) -> Iterator[Message]:

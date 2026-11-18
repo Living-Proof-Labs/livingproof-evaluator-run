@@ -214,7 +214,8 @@ def test_channels_do_not_affect_each_other() -> None:
         )
     }
     assert stats["/a"].backward_steps == 0 and stats["/a"].max_gap_ns == 10
-    assert stats["/b"].backward_steps == 1 and stats["/b"].max_gap_ns == 1000
+    # Log times 0, 5, 1000.
+    assert stats["/b"].backward_steps == 1 and stats["/b"].max_gap_ns == 995
 
 
 def test_the_gap_in_seconds_is_exact_for_a_decimal_limit() -> None:
@@ -268,7 +269,15 @@ def test_the_reader_imports_nothing_of_the_check_or_the_result() -> None:
             assert node.level == 0, "no relative imports"
             imported.add((node.module or "").split(".")[0])
     assert "livingproof_evaluator_run" not in imported
-    assert imported <= {"__future__", "dataclasses", "mcap", "pathlib", "collections", "typing"}
+    assert imported <= {
+        "__future__",
+        "array",
+        "dataclasses",
+        "mcap",
+        "pathlib",
+        "collections",
+        "typing",
+    }
 
 
 def test_the_readers_small_api() -> None:

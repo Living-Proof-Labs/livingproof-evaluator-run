@@ -146,9 +146,22 @@ def usable_channels(value: object) -> list[str] | None:
     return list(dict.fromkeys(value))
 
 
-def judge(required_channels: list[str], max_gap_seconds: float, trials: list[Trial]) -> Outcome:
+def judge(
+    required_channels: list[str],
+    max_gap_seconds: float,
+    trials: list[Trial],
+    *,
+    truncation_once: bool = False,
+) -> Outcome:
     """Judge each present recording. ``max_gap_seconds`` has no default: the caller takes it from
-    the evidence. Findings follow the contract's order."""
+    the evidence. Findings follow the contract's order.
+
+    By default the rules are the contract's (v1.1.0): an incomplete recording also gets a
+    ``missing-channel`` for each required channel its channel list lacks. With ``truncation_once``
+    an incomplete recording gets ``mcap-incomplete`` and no ``missing-channel``, since the reader
+    could not read it and its absent channels say nothing more (livingproof-evaluator#34). Only
+    the reader's own evidence (``from_evidence``) sets it; a request is judged by the contract.
+    """
     findings: list[dict] = []
     failing: set[str] = set()
     for trial in trials:
@@ -162,7 +175,7 @@ def judge(required_channels: list[str], max_gap_seconds: float, trials: list[Tri
                 )
             )
         channels = {channel.topic: channel for channel in trial.channels}
-        for topic in required_channels:
+        for topic in [] if truncation_once and not trial.complete else required_channels:
             channel = channels.get(topic)
             if channel is None or not _number(channel.message_count) or channel.message_count == 0:
                 mine.append(
@@ -410,7 +423,7 @@ def from_evidence(
         )
     if skipped:
         notes.append(f"Not checked: recording of {_listed(skipped)} (no file to read).")
-    outcome = judge(channels, limit, trials)
+    outcome = judge(channels, limit, trials, truncation_once=True)
     if not outcome.applicable:
         return _not_applicable(
             "no recording file is present to judge", notes[-1:] if skipped else []
