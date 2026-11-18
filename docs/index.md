@@ -34,8 +34,23 @@ the result summary, never counted as matching, and never fails the check. Until 
 runner and verifier record the spec files and image digest they used
 (livingproof-sim-mujoco#104, capability-verifier#153 and #154), `specs` and
 `verifier` stay not checked. The share is the matching subjects divided by five
-when a subject differs, and 100 otherwise. A manifest with no embedded lock reports
-`pins` as not applicable.
+when a subject differs, and 100 otherwise. When no subject could be compared (no
+embedded lock, a lock that declares nothing the run recorded, or a run that recorded
+nothing the lock declares), `pins` is reported as not applicable rather than as a pass.
+
+What "recorded" means: `configuration.sha256` and `runner.commit` are copied from the
+lock by the runner, so a match on those two shows the run carried the lock's values,
+not that anything was measured. Only `world` and `adapter_commit` are truly measured.
+The `sha256:` prefix and letter case of a digest are compared as written; they are
+normalised once livingproof-sim-mujoco#104 and capability-verifier#153 and #154 land.
+The robot-profile fixture listed in
+[issue 5](https://github.com/Living-Proof-Labs/livingproof-evaluator-run/issues/5) is
+out of scope for this check.
+
+Values copied from evidence into the summary are shown escaped and shortened to 100
+characters (a newline as `\x0a`, `<` as `\u003c`), so the result always matches the
+contract's descriptor plain-text pattern. If a descriptor still would not match, the
+command exits 1 and writes no result.
 
 Start with this scope and the [verification limits](verification.md). To propose
 behavior, use
