@@ -559,7 +559,8 @@ def _write_result(
         shown = all_shown
     if success:
         # The copy is at most 400 characters. "Stop reasons" notes are dropped first when the
-        # card is tight, so a "Not checked" note can share it with the pass sentences. A
+        # card is tight, and preserved in details with a marker on the card, so a
+        # "Not checked" note can share it with the pass sentences. A
         # sentence that says a check passed is then dropped last-check-first, before a note
         # about what was not checked is ever cut.
         parts = [report.success_copy for report in reports if report.success_copy]
@@ -574,9 +575,12 @@ def _write_result(
             return " ".join([*pass_parts, *extra])
 
         tail = [*stop, *kept]
+        dropped_notes = []
         while stop and len(packed(parts, tail)) > 400:
-            stop.pop()
-            tail = [*stop, *kept]
+            dropped_notes.insert(0, stop.pop())
+            tail = [*stop, *kept, "More notes."]
+        if dropped_notes:
+            descriptor["details_copy"] = " ".join(dropped_notes)
         while parts and len(packed(parts, tail)) > 400:
             parts.pop()
         descriptor["success_copy"] = _clip(packed(parts, tail), 400)
