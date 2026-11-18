@@ -103,3 +103,129 @@ def test_the_guard_names_an_over_limit_descriptor_field(
     assert main([str(_request(tmp_path, ["trial-01"])), "--out", str(out)]) == 1
     assert not out.exists()
     assert "title" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "trial,expected",
+    [
+        ("a" * 35 + "<" + "b" * 20, "a" * 35 + "\u2026"),
+        ("a" * 33 + "<" + "b" * 20, "a" * 33 + "\\u003c\u2026"),
+        ("<" * 50, "\\u003c" * 6 + "\u2026"),
+        ("a" * 36 + "\n" + "b" * 20, "a" * 36 + "\u2026"),
+        ("a" * 35 + "\n" + "b" * 20, "a" * 35 + "\\x0a\u2026"),
+    ],
+)
+def test_clipping_never_splits_an_escape_sequence(
+    tmp_path: Path, trial: str, expected: str
+) -> None:
+    out = tmp_path / "result.json"
+    assert main([str(_request(tmp_path, [trial])), "--out", str(out)]) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    (item,) = [i for i in document["descriptor"]["findings"] if "trial" in i]
+    assert item["trial"] == expected
+    assert base._validate(document) == []
+
+
+def test_text_clipping_never_splits_an_escape_sequence(tmp_path: Path) -> None:
+    # "Planned trial " (14) + 260*"a" (260) = 274; \u003c spans [274, 280), straddling cut 279.
+    trial = "a" * 260 + "<" + "b" * 30
+    out = tmp_path / "result.json"
+    assert main([str(_request(tmp_path, [trial])), "--out", str(out)]) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    (item,) = [i for i in document["descriptor"]["findings"] if "trial" in i]
+    assert item["text"] == "Planned trial " + "a" * 260 + "\u2026"
+    assert base._validate(document) == []
+
+
+def _clean_request(tmp_path: Path, trial_ids: list[str]) -> Path:
+    request = json.loads((EXAMPLES / "clean" / "request.json").read_text())
+    request["integrity"]["manifest"]["planned_trials"] = [{"id": item} for item in trial_ids]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    return source
+
+
+@pytest.mark.parametrize("count", [49, 50])
+def test_at_or_below_the_cap_no_overflow_note_is_added(tmp_path: Path, count: int) -> None:
+    out = tmp_path / "result.json"
+    ids = [f"trial-{index:03d}" for index in range(count)]
+    assert main([str(_clean_request(tmp_path, ids)), "--out", str(out)]) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    shown = document["descriptor"]["findings"]
+    assert len(shown) == count
+    assert all("trial" in item for item in shown)
+    assert "more finding" not in document["descriptor"]["details_copy"]
+    assert base._validate(document) == []
+
+
+@pytest.mark.parametrize("count", [51, 75])
+def test_past_the_cap_adds_an_and_n_more_note(tmp_path: Path, count: int) -> None:
+    out = tmp_path / "result.json"
+    ids = [f"trial-{index:03d}" for index in range(count)]
+    assert main([str(_clean_request(tmp_path, ids)), "--out", str(out)]) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    shown = document["descriptor"]["findings"]
+    assert len(shown) == MAX_FINDINGS
+    assert [item["trial"] for item in shown[:-1]] == ids[: MAX_FINDINGS - 1]
+    dropped = count - (MAX_FINDINGS - 1)
+    expected_note = f"And {dropped} more findings (showing {MAX_FINDINGS - 1} of {count})."
+    assert shown[-1] == {"text": expected_note}
+    assert document["descriptor"]["details_copy"].endswith(expected_note)
+    assert len(document["descriptor"]["details_copy"]) <= 1000
+    assert base._validate(document) == []
+
+
+def test_overflow_note_keeps_pins_not_checked_note_within_details_limit(tmp_path: Path) -> None:
+    request = json.loads((EXAMPLES / "pins" / "request.json").read_text())
+    del request["integrity"]["manifest"]["pins"]["verifier"]
+    ids = [f"trial-{index:03d}" for index in range(MAX_FINDINGS)]
+    request["integrity"]["manifest"]["planned_trials"] = [{"id": item} for item in ids]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+    # 50 completeness + 5 pins (4 differing; verifier not checked) = 54 findings.
+    shown = document["descriptor"]["findings"]
+    assert len(shown) == MAX_FINDINGS
+    expected_note = "And 5 more findings (showing 49 of 54)."
+    assert shown[-1] == {"text": expected_note}
+    details = document["descriptor"]["details_copy"]
+    assert expected_note in details
+    assert "Not checked: verifier." in details
+    assert len(details) <= 1000
+    assert base._validate(document) == []
+
+
+@pytest.mark.parametrize("trial_ids", [[""], ["trial-01", ""]])
+def test_empty_trial_id_exits_2_with_nothing_written(tmp_path: Path, trial_ids: list[str]) -> None:
+    out = tmp_path / "result.json"
+    assert main([str(_request(tmp_path, trial_ids)), "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("blank", ["   ", "\u200b", "\ufeff"])
+def test_blank_trial_id_fails_closed_with_nothing_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], blank: str
+) -> None:
+    out = tmp_path / "result.json"
+    assert main([str(_request(tmp_path, [blank])), "--out", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "not plain text" in err and "findings[0].trial" in err
+
+
+@pytest.mark.parametrize("blank", ["   ", "\u200b"])
+def test_present_blank_trial_id_also_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], blank: str
+) -> None:
+    request = json.loads((EXAMPLES / "clean" / "request.json").read_text())
+    request["integrity"]["manifest"]["planned_trials"] = [{"id": blank}]
+    trial = dict(request["integrity"]["trials"][0], id=blank)
+    request["integrity"]["trials"] = [trial]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    assert "not plain text" in capsys.readouterr().err

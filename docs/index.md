@@ -51,10 +51,18 @@ out of scope for this check.
 Values copied from evidence into the summary are shown escaped and shortened to 100
 characters (a newline as `\x0a`, `<` as `\u003c`), so the result always matches the
 contract's descriptor plain-text pattern. If a descriptor still would not match, the
-command exits 1 and writes no result. The same holds for lengths: in the descriptor a
-finding's trial is cut to 40 characters and its text to 280, ending in an ellipsis (the
+command exits 1 and writes no result. In particular, a blank trial identifier (empty,
+whitespace only, or format characters only) has no visible characters and fails closed:
+an empty identifier exits 2 with nothing written, and an invisible identifier exits 1
+with nothing written.
+
+The same holds for lengths: in the descriptor a finding's trial is cut to 40 characters
+and its text to 280, ending in an ellipsis and never splitting an escape sequence (the
 check's own findings keep the full trial id), and a descriptor field over the contract's
-maximum length also exits 1 with nothing written.
+maximum length also exits 1 with nothing written. The descriptor holds at most 50
+findings; when more than 50 are reported, it shows the first 49 and adds a 50th note
+(`And N more findings (showing 49 of M).`) in both the summary findings and
+`details_copy`, while the check's own findings keep all of them.
 
 - `plan-conformance` 1.0.0: the trials that ran are the trials that were planned. It reads
   structure only and never opens a trial file, so a missing or hash-mismatched trial file stays

@@ -1,6 +1,9 @@
 """Reviewer coverage for the descriptor length clipping and guard (PR 11, head 62754f5).
 
-Scripted from Vera's probes. Everything here passes on that head.
+Scripted from Vera's probes. Everything here passed on that head; for issue #12,
+past 50 findings the 50th descriptor finding is now an "and N more" summary note
+(49 trial findings plus 1 note), so the trial-slice check compares against the
+trial findings shown.
 """
 
 from __future__ import annotations
@@ -112,7 +115,8 @@ def test_more_findings_than_the_cap_keep_the_check_whole_and_the_descriptor_at_t
     assert [f["trial_id"] for f in _check(document, "completeness")["findings"]] == ids
     shown = document["descriptor"]["findings"]
     assert len(shown) <= MAX_FINDINGS
-    assert [item["trial"] for item in shown if "trial" in item] == ids[: len(shown)]
+    trials = [item["trial"] for item in shown if "trial" in item]
+    assert trials == ids[: len(trials)]
     assert document["integrity"]["run"]["test_system_status"] == "ERROR"
     assert base._validate(document) == []
 
