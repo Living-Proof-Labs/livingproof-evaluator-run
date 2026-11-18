@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import recordings as rec
 import test_completeness as base
-from test_recording import _categories, _check, _declare, _evidence, _media, _run
+from test_recording import _check, _declare, _evidence, _media, _run
 
 from livingproof_evaluator_run import mcap_reader
 
@@ -91,6 +91,10 @@ def test_a_hostile_recording_in_a_run_is_a_finding_not_a_crash(tmp_path: Path) -
     (media / "media.json").write_text(json.dumps(document), encoding="utf-8")
     result = _run(folder, tmp_path, media)
     check = _check(result)
-    assert _categories(check)[0] == "mcap-incomplete"
-    assert {item["trial_id"] for item in check["findings"]} == {"trial-02"}
+    assert check["findings"] == []
+    assert [i["trial_id"] for i in check["not_checked"]] == ["trial-02"]
+    completeness = _check(result, "completeness")
+    assert [(i["trial_id"], i["category"]) for i in completeness["findings"]] == [
+        ("trial-02", "truncated-recording")
+    ]
     assert base._validate(result) == []

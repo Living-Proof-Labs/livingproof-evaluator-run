@@ -1,4 +1,4 @@
-"""Evaluate completeness, pins, plan-conformance, termination and recording (all 1.0.0)."""
+"""Evaluate completeness, pins, plan-conformance, termination and recording (all 1.1.0)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from livingproof_evaluator_run import pins, plan_conformance, recording, termination
+from livingproof_evaluator_run import (
+    completeness,
+    pins,
+    plan_conformance,
+    recording,
+    termination,
+)
 from livingproof_evaluator_run.plain import (
     DESCRIPTOR_LIMITS,
     FINDING_LIMITS,
@@ -19,8 +25,6 @@ from livingproof_evaluator_run.plain import (
     plain,
 )
 from livingproof_evaluator_run.identity import (
-    CHECK_ID,
-    CHECK_VERSION,
     DESCRIPTOR_KIND,
     DISPLAY_NAME,
     EVALUATOR_ID,
@@ -35,7 +39,7 @@ from livingproof_evaluator_run.identity import (
 )
 
 EVIDENCE_FORMAT = "livingproof-hallway-evidence/2.0.0"
-COMPLETENESS_SUCCESS = "Every planned trial has its observation file."
+COMPLETENESS_SUCCESS = completeness.SUCCESS_COPY
 
 
 @dataclass
@@ -45,14 +49,18 @@ class Report:
     check: dict
     success_copy: str | None = None
     notes: list[str] = field(default_factory=list)
+    # What the check left out, as short names for the descriptor's one "Not checked" sentence.
+    unchecked: list[str] = field(default_factory=list)
     shown: list[dict] = field(default_factory=list)
 
 
 def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None) -> int:
     """Write a 1.1.0 integrity result for the evidence manifest at ``manifest_path``.
 
-    ``media`` is the directory holding ``media.json`` and ``mcap/`` (the media job's artifact);
-    without it the ``recording`` check is not applicable.
+    ``media`` is the directory holding ``media.json`` and ``mcap/`` (the media job's artifact).
+    ``completeness`` reads the recordings ``media.json`` lists, and ``recording`` judges the ones
+    that are present; without ``media`` neither looks at a recording and ``recording`` is not
+    applicable.
     """
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -60,13 +68,21 @@ def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None)
     if planned <= 0:
         return 2
     results = _results_by_index(manifest)
+    read = recording.read_media(media, planned, results)
     findings: list[dict] = []
     trials: list[dict] = []
     inputs = [_input("manifest", manifest_path)]
     complete = 0
-    complete_indexes: set[int] = set()
+    # The trials whose observation file is there and matches its digest: termination judges those,
+    # whatever the state of the trial's recording.
+    observed_indexes: set[int] = set()
+    applicable = completeness.applicable_for_evidence(manifest)
     for index in range(1, planned + 1):
         trial_id = f"trial-{index:02d}"
+        if not applicable:
+            # The run ran no trials: nothing is wrong with a trial that never ran.
+            trials.append(_trial_status(trial_id, ok=True))
+            continue
         entry = results.get(index)
         recorded = entry.get("path") if entry else None
         path = manifest_path.parent / recorded if isinstance(recorded, str) and recorded else None
@@ -80,30 +96,43 @@ def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None)
             continue
         digest = _sha256(path)
         inputs.append(_input("observations", path, uri=str(entry["path"])))
+        mine: list[dict] = []
+        found = completeness.recording_finding(
+            trial_id,
+            read.state(index) if read else None,
+            cap_exceeded=bool(read and read.cap_exceeded(index)),
+        )
+        if found:
+            mine.append(found)
         expected = entry.get("sha256")
         if not isinstance(expected, str) or digest != expected:
-            findings.append(
+            mine.append(
                 _finding(
                     "missing-observations",
                     trial_id,
                     f"Trial {trial_id} observation digest does not match the declared sha256.",
                 )
             )
+        else:
+            observed_indexes.add(index)
+        if mine:
+            findings.extend(mine)
             trials.append(_trial_status(trial_id, ok=False))
             continue
         complete += 1
-        complete_indexes.add(index)
         trials.append(_trial_status(trial_id, ok=True))
-    reports = [_completeness(findings, complete, planned)]
+    reports = [_completeness(findings, complete, planned, applicable)]
     outcome = pins.from_evidence(manifest, manifest_path)
     reports.append(_pins(outcome))
     reports.append(_plan_conformance(plan_conformance.from_evidence(manifest)))
     reports.append(
         _termination(
-            termination.from_evidence(manifest, manifest_path, planned, results, complete_indexes)
+            termination.from_evidence(manifest, manifest_path, planned, results, observed_indexes)
         )
     )
-    reports.append(_recording(recording.from_evidence(manifest, media, planned, results)))
+    reports.append(
+        _recording(recording.from_evidence(manifest, media, planned, results, read=read))
+    )
     return _write_result(
         out,
         run_id=str(manifest.get("run_id") or "run"),
@@ -122,7 +151,16 @@ def evaluate(source: Path, out: Path, media: Path | None = None) -> int:
     document = json.loads(source.read_text(encoding="utf-8"))
     fmt = document.get("format")
     if isinstance(fmt, str) and fmt.startswith("livingproof-evaluator-request/"):
-        return _evaluate_request(document, source, out)
+        try:
+            return _evaluate_request(document, source, out)
+        except recording.MalformedRequest as exc:
+            # An inconsistent request gives no trustworthy result: write none, exit 2, the same
+            # as for any other malformed request.
+            print(
+                f"livingproof-evaluator-run: malformed request: {exc}; no result written",
+                file=sys.stderr,
+            )
+            return 2
     return evaluate_evidence(source, out, media)
 
 
@@ -144,7 +182,12 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     findings: list[dict] = []
     trials: list[dict] = []
     complete = 0
+    applicable = completeness.applicable_for_request(payload)
     for trial_id in planned:
+        if not applicable:
+            # The run ran no trials: nothing is wrong with a trial that never ran.
+            trials.append(_trial_status(trial_id, ok=True))
+            continue
         trial = evidence.get(trial_id)
         if trial is None:
             findings.append(
@@ -157,6 +200,7 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
         ended = trial.get("termination")
         if ended in ("timeout", "crash"):
             # completeness owns a trial that did not end on its own; termination refers to this.
+            # It is the one report of that ending, so the trial has no other finding.
             findings.append(
                 _finding(
                     f"ended-by-{ended}",
@@ -166,23 +210,22 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
             )
             trials.append(_trial_status(trial_id, ok=False))
             continue
-        observations = (
-            trial.get("observations") if isinstance(trial.get("observations"), dict) else {}
-        )
-        if observations.get("state") == "missing":
-            findings.append(
-                _finding(
-                    "missing-observations",
-                    trial_id,
-                    f"Planned trial {trial_id} has no observations.",
-                )
+        mine = [
+            found
+            for found in (
+                completeness.recording_finding(trial_id, _state(trial, "recording")),
+                completeness.observations_finding(trial_id, _state(trial, "observations")),
             )
+            if found
+        ]
+        if mine:
+            findings.extend(mine)
             trials.append(_trial_status(trial_id, ok=False))
             continue
         complete += 1
         trials.append(_trial_status(trial_id, ok=True))
     inputs = list(request.get("inputs") or [])
-    reports = [_completeness(findings, complete, len(planned))]
+    reports = [_completeness(findings, complete, len(planned), applicable)]
     reports.append(_pins(pins.from_request(payload)))
     reports.append(_plan_conformance(plan_conformance.from_request(payload)))
     reports.append(_termination(termination.from_request(payload)))
@@ -208,6 +251,12 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
         trials=trials,
         reports=reports,
     )
+
+
+def _state(trial: dict, key: str) -> object:
+    """The ``state`` of a trial's ``recording`` or ``observations``, None when it has none."""
+    value = trial.get(key)
+    return value.get("state") if isinstance(value, dict) else None
 
 
 def _planned_count(manifest: dict) -> int:
@@ -239,13 +288,7 @@ def _input(role: str, path: Path, uri: str | None = None) -> dict:
     return {"role": role, "uri": uri or path.name, "sha256": _sha256(path)}
 
 
-def _finding(category: str, trial_id: str, summary: str) -> dict:
-    return {
-        "category": category,
-        "classification": "test_system",
-        "summary": summary,
-        "trial_id": trial_id,
-    }
+_finding = completeness.finding
 
 
 def _trial_status(trial_id: str, *, ok: bool) -> dict:
@@ -257,10 +300,22 @@ def _trial_status(trial_id: str, *, ok: bool) -> dict:
     }
 
 
-def _completeness(findings: list[dict], complete: int, planned: int) -> Report:
+def _completeness(findings: list[dict], complete: int, planned: int, applicable: bool) -> Report:
+    """completeness 1.1.0. Not applicable when the run's preconditions were unmet (it ran no
+    trials), so no planned trial is reported as missing."""
+    if not applicable:
+        check = {
+            "id": completeness.COMPLETENESS_ID,
+            "version": completeness.COMPLETENESS_VERSION,
+            "applicable": False,
+            "success": True,
+            "findings": [],
+        }
+        note = "Not checked: completeness, the run's preconditions were unmet and it ran no trials."
+        return Report(check, notes=[note])
     check = {
-        "id": CHECK_ID,
-        "version": CHECK_VERSION,
+        "id": completeness.COMPLETENESS_ID,
+        "version": completeness.COMPLETENESS_VERSION,
         "applicable": True,
         "success": not findings,
         "percentage": 100 * complete / planned,
@@ -274,33 +329,33 @@ def _completeness(findings: list[dict], complete: int, planned: int) -> Report:
 
 
 def _pins(outcome: pins.PinsOutcome | None) -> Report:
-    """pins 1.0.0. If nothing could be compared it is not applicable, never a pass.
+    """pins 1.1.0. If nothing could be compared it is not applicable, never a pass.
 
     That is no lock in the evidence, a lock that declares nothing the run recorded, or a run
-    that recorded nothing the lock declares: success and 100 would be a pass nothing earned.
+    that recorded nothing the lock declares: success and 100 would be a pass nothing earned. The
+    subjects that were not checked are in ``not_checked``, and the descriptor's note is made from
+    that list.
     """
-    if outcome is None or not outcome.compared:
-        check = {
-            "id": pins.PINS_ID,
-            "version": pins.PINS_VERSION,
-            "applicable": False,
-            "success": True,
-            "findings": [],
-        }
-        notes = [f"Not checked: {', '.join(outcome.not_checked)}."] if outcome else []
-        return Report(check, notes=notes)
-    findings = outcome.findings
-    check = {
+    nothing = outcome is None
+    outcome = outcome or pins.nothing_to_compare()
+    check: dict = {
         "id": pins.PINS_ID,
-        "version": pins.PINS_VERSION,
-        "applicable": True,
-        "success": not findings,
-        "percentage": outcome.percentage,
-        "findings": findings,
+        "version": outcome.version,
+        "applicable": outcome.compared,
+        "success": not outcome.findings,
     }
-    notes = []
-    if outcome.not_checked:
-        notes.append(f"Not checked: {', '.join(outcome.not_checked)}.")
+    # No lock, or none declared on either side, is not a note on every card.
+    unchecked = [] if nothing else outcome.unchecked
+    if not outcome.compared:
+        check["findings"] = []
+        if outcome.not_checked is not None:
+            check["not_checked"] = outcome.not_checked
+        return Report(check, unchecked=unchecked)
+    findings = outcome.findings
+    check["percentage"] = outcome.percentage
+    check["findings"] = findings
+    if outcome.not_checked is not None:
+        check["not_checked"] = outcome.not_checked
     success = None
     if not findings:
         matched = ", ".join(outcome.matched) or "nothing"
@@ -308,47 +363,62 @@ def _pins(outcome: pins.PinsOutcome | None) -> Report:
     shown = [
         {"text": _clip(item["summary"], 280), "severity": "Needs attention"} for item in findings
     ]
-    return Report(check, success_copy=success, notes=notes, shown=shown)
+    return Report(check, success_copy=success, unchecked=unchecked, shown=shown)
+
+
+def _words(subject: str) -> str:
+    """A not-checked subject as the descriptor says it: ``lock-command-speed`` is
+    ``lock command speed``."""
+    return subject.replace("-", " ")
 
 
 def _plan_conformance(outcome: plan_conformance.Outcome) -> Report:
-    """plan-conformance 1.0.0. Nothing compared is not applicable, never a pass.
+    """plan-conformance 1.1.0. Nothing compared is not applicable, never a pass.
 
     Its findings carry no trial id (a missing trial file is a completeness finding), so the
-    descriptor's findings name no trial either.
+    descriptor's findings name no trial either. The comparisons not made are in ``not_checked``,
+    and the descriptor's note is made from that list.
     """
     check = {
         "id": plan_conformance.PLAN_CONFORMANCE_ID,
-        "version": plan_conformance.PLAN_CONFORMANCE_VERSION,
+        "version": outcome.version,
         "applicable": outcome.applicable,
         "success": not outcome.findings,
     }
     if outcome.applicable:
         check["percentage"] = outcome.percentage
     check["findings"] = outcome.findings
+    notes = outcome.notes
+    unchecked: list[str] = []
+    if outcome.not_checked is not None:
+        check["not_checked"] = outcome.not_checked
+        if outcome.applicable:
+            notes = []
+            unchecked = [_words(item["subject"]) for item in outcome.not_checked]
     if not outcome.applicable or outcome.findings:
         shown = [
             {"text": _clip(item["summary"], 280), "severity": "Needs attention"}
             for item in outcome.findings
         ]
-        return Report(check, notes=outcome.notes, shown=shown)
+        return Report(check, notes=notes, unchecked=unchecked, shown=shown)
     agree = "The plan, the trials and the lock" if outcome.with_lock else "The plan and the trials"
     return Report(
         check,
         success_copy=f"{agree} agree on the trial count.",
-        notes=outcome.notes,
+        notes=notes,
+        unchecked=unchecked,
     )
 
 
 def _termination(outcome: termination.Outcome) -> Report:
-    """termination 1.0.0. No judged trial is not applicable, never a pass.
+    """termination 1.1.0. No judged trial is not applicable, never a pass.
 
     A referral points at a ``completeness`` finding and is not a finding: it changes neither
     ``success`` nor ``percentage``. ``referrals`` is always present on this check.
     """
     check = {
         "id": termination.TERMINATION_ID,
-        "version": termination.TERMINATION_VERSION,
+        "version": outcome.version,
         "applicable": outcome.applicable,
         "success": not outcome.findings,
     }
@@ -371,13 +441,15 @@ def _termination(outcome: termination.Outcome) -> Report:
 
 
 def _recording(outcome: recording.Outcome) -> Report:
-    """recording 1.0.0. Nothing judged is not applicable, never a pass.
+    """recording 1.1.0. Nothing judged is not applicable, never a pass.
 
     ``limits`` is present exactly when the check is applicable, and equals the evidence's gap limit.
+    ``not_checked`` lists every trial that was not judged, and the descriptor's note is made from
+    that list.
     """
     check = {
         "id": recording.RECORDING_ID,
-        "version": recording.RECORDING_VERSION,
+        "version": outcome.version,
         "applicable": outcome.applicable,
         "success": not outcome.findings,
     }
@@ -385,6 +457,13 @@ def _recording(outcome: recording.Outcome) -> Report:
         check["percentage"] = outcome.percentage
         check["limits"] = outcome.limits
     check["findings"] = outcome.findings
+    notes = list(outcome.notes)
+    if outcome.not_checked is not None:
+        check["not_checked"] = outcome.not_checked
+        for reason, words in (("not-present", "not present"), ("not-recorded", "not recorded")):
+            ids = [item["trial_id"] for item in outcome.not_checked if item["reason"] == reason]
+            if ids:
+                notes.append(f"Not checked: recording of {recording.listed_ids(ids)} ({words}).")
     shown = [
         {
             "text": _clip(item["summary"], 280),
@@ -400,7 +479,7 @@ def _recording(outcome: recording.Outcome) -> Report:
             "Every recording read is a usable MCAP file that matches media.json,"
             f" with no gap over {gap} s."
         )
-    return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
+    return Report(check, success_copy=success, notes=notes, shown=shown)
 
 
 _ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})")
@@ -451,6 +530,10 @@ def _write_result(
         "icon_accessible_name": DISPLAY_NAME,
     }
     notes = " ".join(note for report in reports for note in report.notes)
+    unchecked = [name for report in reports for name in report.unchecked]
+    if unchecked:
+        # One sentence, so what the checks left out costs the 400-character card the least.
+        notes = " ".join(part for part in (notes, f"Not checked: {', '.join(unchecked)}.") if part)
     # Text copied out of evidence is escaped, so the descriptor matches the contract's
     # plain-text pattern whatever the evidence holds.
     # They are also cut to the contract's lengths on whole escape boundaries. The check's
@@ -475,12 +558,28 @@ def _write_result(
     else:
         shown = all_shown
     if success:
-        # The copy is at most 400 characters. A sentence that says a check passed is dropped,
-        # last check first, before a note about what was not checked is ever cut.
+        # The copy is at most 400 characters. "Stop reasons" notes are dropped first when the
+        # card is tight, so a "Not checked" note can share it with the pass sentences. A
+        # sentence that says a check passed is then dropped last-check-first, before a note
+        # about what was not checked is ever cut.
         parts = [report.success_copy for report in reports if report.success_copy]
-        while parts and len(" ".join([*parts, notes] if notes else parts)) > 400:
+        raw_notes = [note for report in reports for note in report.notes]
+        if unchecked:
+            raw_notes.append(f"Not checked: {', '.join(unchecked)}.")
+        stop, kept = [], []
+        for note in raw_notes:
+            (stop if note.startswith("Stop reasons:") else kept).append(note)
+
+        def packed(pass_parts: list[str], extra: list[str]) -> str:
+            return " ".join([*pass_parts, *extra])
+
+        tail = [*stop, *kept]
+        while stop and len(packed(parts, tail)) > 400:
+            stop.pop()
+            tail = [*stop, *kept]
+        while parts and len(packed(parts, tail)) > 400:
             parts.pop()
-        descriptor["success_copy"] = _clip(" ".join([*parts, notes] if notes else parts), 400)
+        descriptor["success_copy"] = _clip(packed(parts, tail), 400)
     else:
         kept = all_shown[: MAX_FINDINGS - 1] if overflow_note else shown
         problems = " ".join(item["text"] for item in kept)

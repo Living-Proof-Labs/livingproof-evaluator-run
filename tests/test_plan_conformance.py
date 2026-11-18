@@ -21,6 +21,7 @@ import copy
 import json
 import random
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -226,11 +227,12 @@ def test_good_run_conforms(tmp_path: Path) -> None:
     document, check = _run_check(GOOD, tmp_path)
     assert check == {
         "id": CHECK,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": True,
         "success": True,
         "percentage": 100,
         "findings": [],
+        "not_checked": [],
     }
     assert document["integrity"]["run"]["test_system_status"] == "COMPLETED"
     assert "conclusion" not in document["integrity"]["run"]
@@ -243,12 +245,12 @@ def test_the_summary_says_whether_the_lock_was_compared(tmp_path: Path) -> None:
         "The plan, the trials and the lock agree on the trial count."
         in (document["descriptor"]["success_copy"])
     )
-    assert "Not checked: the plan against the lock" not in document["descriptor"]["success_copy"]
+    assert "lock trial count" not in document["descriptor"]["success_copy"]
     document, _ = _run_check(base.FIXTURES / "good", tmp_path / "without", None)
     copy_ = document["descriptor"]["success_copy"]
     assert "The plan and the trials agree on the trial count." in copy_
     assert "the lock agree" not in copy_
-    assert "Not checked: the plan against the lock." in copy_
+    assert "Not checked: lock trial count, lock command speed." in copy_
 
 
 def test_real_run_conforms(tmp_path: Path) -> None:
@@ -337,7 +339,7 @@ def test_findings_fixture_is_the_contract_example(tmp_path: Path) -> None:
     expected = json.loads((EXAMPLES / "findings" / "result.json").read_text())["integrity"][
         "checks"
     ][0]
-    assert check == expected
+    assert check == {**expected, "version": "1.1.0", "not_checked": []}
     assert check["percentage"] == 20
     assert sorted(set(_categories(check))) == sorted(
         [
@@ -385,10 +387,11 @@ def test_unmet_preconditions_are_not_applicable(tmp_path: Path) -> None:
     check = _check(document)
     assert check == {
         "id": CHECK,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": False,
         "success": True,
         "findings": [],
+        "not_checked": [],
     }
     # Not an error: the check itself neither fails the run nor lowers its percentage.
     assert base._validate(document) == []
@@ -607,11 +610,11 @@ def test_the_registry_and_the_enum_name_this_check_and_version() -> None:
     from livingproof_evaluator_run import plan_conformance
 
     assert plan_conformance.PLAN_CONFORMANCE_ID == CHECK
-    assert plan_conformance.PLAN_CONFORMANCE_VERSION == "1.0.0"
+    assert plan_conformance.PLAN_CONFORMANCE_VERSION == "1.1.0"
     schema = json.loads(
         (base.CONTRACT / "schema/integrity/checks/plan-conformance.schema.json").read_text()
     )
-    assert schema["properties"]["version"]["const"] == plan_conformance.PLAN_CONFORMANCE_VERSION
+    assert plan_conformance.PLAN_CONFORMANCE_VERSION in schema["properties"]["version"]["enum"]
     enum = schema["properties"]["findings"]["items"]["properties"]["category"]["enum"]
     assert sorted(plan_conformance.CATEGORIES) == sorted(enum)
 
@@ -631,12 +634,74 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("name", ["conformant", "findings", "preconditions-unmet"])
+def _as_1_1_0(check: dict, request: dict) -> dict:
+    """The contract keeps its 1.0.0 examples as published. A 1.0.0 check read as 1.1.0 changes
+    its version and gains the ``not_checked`` the reference rule derives from the request."""
+    if check["version"] != "1.0.0":
+        return check
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    rule = integrity_rules.plan_conformance(request["integrity"], "1.1.0")
+    return {**check, "version": "1.1.0", "not_checked": rule["not_checked"]}
+
+
+@pytest.mark.parametrize(
+    "name", ["conformant", "findings", "preconditions-unmet", "no-lock", "lock-checked"]
+)
 def test_the_contract_examples_give_the_contract_check(name: str, tmp_path: Path) -> None:
-    document = _run_request(_request(name), tmp_path)
+    request = _request(name)
+    document = _run_request(request, tmp_path)
     expected = json.loads((EXAMPLES / name / "result.json").read_text(encoding="utf-8"))
-    assert _check(document) == [c for c in _checks(expected) if c["id"] == CHECK][0]
+    want = [c for c in _checks(expected) if c["id"] == CHECK][0]
+    assert _check(document) == _as_1_1_0(want, request)
     assert base._validate(document) == []
+
+
+@pytest.mark.parametrize("name", ["conformant", "findings", "preconditions-unmet"])
+def test_version_1_0_0_is_still_selectable_and_gives_the_published_example(name: str) -> None:
+    from livingproof_evaluator_run import plan_conformance
+
+    request = _request(name)
+    expected = json.loads((EXAMPLES / name / "result.json").read_text(encoding="utf-8"))
+    want = [c for c in _checks(expected) if c["id"] == CHECK][0]
+    assert want["version"] == "1.0.0"
+    outcome = plan_conformance.from_request(request["integrity"], "1.0.0")
+    assert outcome.version == "1.0.0"
+    assert outcome.applicable is want["applicable"]
+    assert outcome.findings == want["findings"]
+    assert outcome.not_checked is None
+    if want["applicable"]:
+        assert outcome.percentage == want["percentage"]
+
+
+def test_a_lock_with_no_command_speed_lists_that_comparison_alone(tmp_path: Path) -> None:
+    request = _request("lock-checked")
+    del request["integrity"]["evidence"][CHECK]["lock"]["plan"]["command_speed"]
+    check = _check(_run_request(request, tmp_path))
+    assert check["not_checked"] == [{"subject": "lock-command-speed", "reason": "not-declared"}]
+    assert check["applicable"] is True
+
+
+def test_the_comparisons_not_made_are_not_in_the_denominator(tmp_path: Path) -> None:
+    no_lock = _check(_run_request(_request("no-lock"), tmp_path))
+    assert [item["subject"] for item in no_lock["not_checked"]] == [
+        "lock-trial-count",
+        "lock-command-speed",
+    ]
+    assert all(item["reason"] == "not-declared" for item in no_lock["not_checked"])
+
+
+def test_the_descriptor_notes_come_from_not_checked(tmp_path: Path) -> None:
+    """One 'Not checked' sentence names every subject any check left out, so a note about the
+    lock does not push a sentence off the 400-character card."""
+    both = _run_request(_request("no-lock"), tmp_path)["descriptor"]["success_copy"]
+    assert "Not checked: lock trial count, lock command speed." in both
+    request = _request("lock-checked")
+    del request["integrity"]["evidence"][CHECK]["lock"]["plan"]["command_speed"]
+    speed = _run_request(request, tmp_path)["descriptor"]["success_copy"]
+    assert "Not checked: lock command speed." in speed
+    assert "lock trial count" not in speed
 
 
 def test_a_request_without_plan_conformance_evidence_is_not_applicable(tmp_path: Path) -> None:
@@ -695,9 +760,10 @@ def _random_evidence(rng: random.Random) -> dict:
     return evidence
 
 
-def test_ours_equal_the_contract_reference_rules() -> None:
-    import sys
-
+@pytest.mark.parametrize("version", ["1.1.0", "1.0.0"])
+def test_ours_equal_the_contract_reference_rules(version: str) -> None:
+    """Each version against the reference rule of that version (the reference defaults to
+    1.1.0, so the version is always passed; livingproof-evaluator#34)."""
     sys.path.insert(0, str(base.CONTRACT / "tests"))
     import integrity_rules
 
@@ -705,14 +771,36 @@ def test_ours_equal_the_contract_reference_rules() -> None:
 
     rng = random.Random(1)
     seen: set[str] = set()
+    listed: set[str] = set()
     for _ in range(600):
         evidence = _random_evidence(rng)
-        expected = integrity_rules.plan_conformance({"evidence": {CHECK: evidence}})
-        outcome = plan_conformance.from_request({"evidence": {CHECK: evidence}})
+        payload = {"evidence": {CHECK: evidence}}
+        expected = integrity_rules.plan_conformance(payload, version)
+        outcome = plan_conformance.from_request(payload, version)
         assert outcome is not None
+        assert outcome.version == version
         assert outcome.applicable is expected["applicable"], evidence
         assert outcome.findings == expected["findings"], evidence
+        assert outcome.not_checked == expected.get("not_checked"), evidence
         if expected["applicable"]:
             assert outcome.percentage == pytest.approx(expected["percentage"]), evidence
         seen.update(item["category"] for item in expected["findings"])
+        listed.update(item["subject"] for item in expected.get("not_checked", []))
     assert seen == set(plan_conformance.CATEGORIES)
+    assert listed == ({"lock-trial-count", "lock-command-speed"} if version != "1.0.0" else set())
+
+
+def test_the_default_version_is_the_current_one_and_is_the_references_default() -> None:
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    from livingproof_evaluator_run import plan_conformance
+
+    rng = random.Random(2)
+    assert plan_conformance.PLAN_CONFORMANCE_VERSION == "1.1.0"
+    for _ in range(100):
+        payload = {"evidence": {CHECK: _random_evidence(rng)}}
+        outcome = plan_conformance.from_request(payload)
+        expected = integrity_rules.plan_conformance(payload)
+        assert outcome.not_checked == expected["not_checked"]
+        assert outcome.findings == expected["findings"]

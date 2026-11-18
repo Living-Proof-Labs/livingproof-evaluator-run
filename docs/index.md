@@ -20,8 +20,14 @@ python -m livingproof_evaluator_run evidence/manifest.json --media media --out r
 
 ## Checks
 
-- `completeness` 1.0.0: see above.
-- `pins` 1.0.0: compares the pins the verification lock declares (embedded in the
+- `completeness` 1.1.0: see above. It also reads `media.json` when `--media` is given: every
+  recording `media.json` lists must be there, readable and not empty. A listed recording that is
+  missing is `missing-recording`, one with no valid footer and summary is `truncated-recording`,
+  and an empty file is `empty-recording`. Completeness owns all three, so a truncated recording is
+  reported once, here, and `recording` does not judge it. Without `--media`, or when the
+  manifest's preconditions are unmet, recordings are not looked at. The check never carries
+  `not_checked`.
+- `pins` 1.1.0: compares the pins the verification lock declares (embedded in the
   manifest as `lock.content`) with what the run recorded, for five subjects.
   A mismatch is one `hash-mismatch` finding on that subject. It names the declared
   and the recorded value, is a test-system finding, and never changes a robot grade.
@@ -34,12 +40,14 @@ python -m livingproof_evaluator_run evidence/manifest.json --media media --out r
 | `specs` | `releases.specs.files` | not recorded, so not checked |
 | `verifier` | `releases.verifier.digest` | not recorded, so not checked |
 
-A subject with no declared or no recorded value is **not checked**. It is listed in
-the result summary, never counted as matching, and never fails the check. Until the
+A subject with no declared or no recorded value is **not checked**. It is listed in the
+check's `not_checked` (reason `not-declared` when neither side carries the pin, `not-recorded`
+when the lock declares it and the run did not) and in the result summary. It is never counted as
+matching and never fails the check. An empty `not_checked` means every subject was compared. Until the
 runner and verifier record the spec files and image digest they used
 (livingproof-sim-mujoco#104, capability-verifier#153 and #154), `specs` and
-`verifier` stay not checked. The share is the matching subjects divided by five
-when a subject differs, and 100 otherwise. When no subject could be compared (no
+`verifier` stay not checked. The share is the matching subjects divided by the subjects that were compared
+when a subject differs, and 100 otherwise (1.0.0 divided by five). When no subject could be compared (no
 embedded lock, a lock that declares nothing the run recorded, or a run that recorded
 nothing the lock declares), `pins` is reported as not applicable rather than as a pass.
 
@@ -68,7 +76,7 @@ findings; when more than 50 are reported, it shows the first 49 and adds a 50th 
 (`And N more findings (showing 49 of M).`) in both the summary findings and
 `details_copy`, while the check's own findings keep all of them.
 
-- `plan-conformance` 1.0.0: the trials that ran are the trials that were planned. It reads
+- `plan-conformance` 1.1.0: the trials that ran are the trials that were planned. It reads
   structure only and never opens a trial file, so a missing or hash-mismatched trial file stays
   a `completeness` finding and a `plan-conformance` finding carries no trial id. Every finding
   is classified `test_system`; none carries a robot verdict.
@@ -97,6 +105,11 @@ boolean or a number with a fraction, or a path that is not text, is a finding an
 exception. `completeness` still reports a run with unmet preconditions by its own rule; this
 check does not change that.
 
+At 1.1.0 the check says what it left out in `not_checked` (required; empty when nothing was
+left out). With no lock in the evidence both lock comparisons are listed, `lock-trial-count` and
+`lock-command-speed`, with the reason `not-declared`; with a lock that records no command speed,
+`lock-command-speed` is listed alone. A check that is not applicable lists both.
+
 On an evaluator request the evidence is `integrity.evidence["plan-conformance"]`, as the
 contract defines it. A request without it reports the check as not applicable. The check
 follows the contract's reference rules (`tests/integrity_rules.py` in the contract kit): the
@@ -104,7 +117,7 @@ tests run both against 600 generated cases. Seeds do not exist in evidence 2.0.0
 indexes stand for them; if seeds return in a later evidence version that is a new check
 version.
 
-- `termination` 1.0.0: every trial that ended on its own records a stop reason, and the plan
+- `termination` 1.1.0: every trial that ended on its own records a stop reason, and the plan
   allows it. `completeness` owns a timeout or a crash, so `termination` never raises a finding
   for one; it lists the trial under `referrals` with the `completeness` category that reports
   it (`ended-by-timeout` or `ended-by-crash`). A referral is not a finding and changes neither
@@ -124,7 +137,9 @@ reported as `unknown-stop-reason`.
 
 **The default allowed list** is `time-limit`, `mission-done`, `left-world` and
 `adapter-or-scenario-done`. It leaves out `simulation-broken`, so a trial whose physics state
-went non-finite is a `disallowed-stop-reason` finding unless the plan says it is allowed. A
+went non-finite is a `disallowed-stop-reason` finding. **At 1.1.0 `simulation-broken` is never
+allowed**: a plan that lists it does not make it so, and the finding says the reason is never
+allowed (1.0.0 let a plan allow it). A
 declaration that is not a list, or names no known stop reason, is not used: the default applies
 and the summary says so. A malformed declaration can therefore never allow more than the default.
 No plan declares a list today, so the default applies to every run.
@@ -154,7 +169,7 @@ reports `ended-by-timeout` or `ended-by-crash` for it, and the stop reasons are 
 words, so nothing is mapped). The tests run the contract's reference rules against these on 600
 generated cases.
 
-- `recording` 1.0.0: each recording that is present is a usable MCAP file that matches
+- `recording` 1.1.0: each recording that is present is a usable MCAP file that matches
   `media.json` and the run evidence. A breach is a test-system finding that names the trial;
   it never changes a robot grade or a trial's own status.
 
@@ -185,7 +200,7 @@ nothing here uses it.
 
 | Category | When |
 | --- | --- |
-| `mcap-incomplete` | the file does not open, or has no valid footer and summary, or a chunk fails its CRC, or it expands past the size limits below and was not read. It is the only finding for that cause: the channels of a file that could not be read are not also reported as `missing-channel` |
+| `mcap-incomplete` | **1.0.0 only.** At 1.1.0 a file with no valid footer is truncated, and `completeness` reports it as `truncated-recording`. This check never emits it |
 | `missing-channel` | a required channel is absent or has no messages |
 | `timestamps-backwards` | a channel has a message earlier than the one before it (counted per channel) |
 | `message-gap-exceeded` | the largest gap between consecutive messages on a channel, in log-time order, is over the limit. Messages written out of order are not a gap; they are `timestamps-backwards` |
@@ -193,11 +208,29 @@ nothing here uses it.
 | `observation-link-mismatch` | `observation_sha256` in `media.json` differs from the run evidence |
 
 The share is the judged recordings without a finding over the judged recordings. A recording is
-judged when `media.json` lists a planned trial and its file is there; a recording that is not
-there is left to `completeness`. `completeness` on a manifest does not look at recordings yet, so
-the summary names the trials that were not judged. With nothing judged, or no media, the check is
-not applicable: it reports no percentage and no `limits`. A run with no media passes as it did
-before this check, and its card carries no note about it.
+judged when `media.json` lists a planned trial and its file is there and readable. Every other
+planned trial is listed in the check's `not_checked`, which is required at 1.1.0 and empty when
+everything was judged:
+
+| Reason | When |
+| --- | --- |
+| `not-present` | `media.json` lists the trial's recording and it is missing, truncated or empty. `completeness` reports it |
+| `not-recorded` | nothing was recorded for the trial: it is not in `media.json` |
+
+With nothing judged, or no media, the check is not applicable: it reports no percentage and no
+`limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
+its card carries no note about it. A run with media but no usable gap limit is also not
+applicable, with an empty `not_checked` and one note that the limit is not declared: it does not
+list each trial as `not-recorded`.
+
+**Truncation is reported once.** A recording with no valid footer is `truncated-recording` from
+`completeness`, which is why `recording` lists the trial `not-present` and says nothing else. On a
+`livingproof-evaluator-request` a trial whose `recording.state` is `present` while
+`evidence.recording` says its file is incomplete contradicts itself. That request is malformed:
+the command prints `malformed request` and why on stderr, exits 2 and writes no result, since any
+result would hide a truncation that nothing reports. The published 1.0.0 `recording/findings`
+request is such a request and is rejected at 1.1.0; it is still judged at 1.0.0 in the
+comparison tests.
 
 **Size limits (hostile recordings).** A recording comes from outside the evaluator, and a few
 kilobytes of compressed chunk can decompress to gigabytes: a 32 KB file that expands to 1 GiB
@@ -212,11 +245,13 @@ the chunks it is about to read against these limits and fails closed when one is
 | chunks | 100,000 |
 
 A value equal to a limit is read; one over it is not. The recording is then not read at all:
-the trial gets one `mcap-incomplete` finding that says it expands past the evaluator's size limit
-when decompressed, with no channel findings and no crash. A named finding for this is
+at 1.1.0 it counts as truncated: `completeness` reports one `truncated-recording` finding that
+says it expands past the evaluator's size limit when decompressed, `recording` lists the trial
+`not-present`, and there are no channel findings and no crash (1.0.0 reported one `mcap-incomplete`
+finding). The contract has no finding named for this;
 [livingproof-evaluator#42](https://github.com/Living-Proof-Labs/livingproof-evaluator/issues/42)
-(owned by Rivet); recording 1.1.0 will not emit `mcap-incomplete`, and adoption of that contract
-should use the named finding once it exists. A chunk header's own size is not trusted, because the
+(owned by Rivet) asks for one, and adoption of that should use it once it exists. A chunk
+header's own size is not trusted, because the
 decompressor ignores it when the compressed frame states another size, so each chunk is
 decompressed into a buffer no larger than the per-chunk limit and counted as it is. The reader
 streams one chunk at a time, so the total cap bounds time and not memory. The limits are on bytes

@@ -1,7 +1,7 @@
-"""termination 1.0.0: every trial that ended on its own records a stop reason the plan allows.
+"""termination 1.1.0: every trial that ended on its own records a stop reason the plan allows.
 
 The contract (livingproof-evaluator ``schema/integrity/checks/termination.schema.json`` and
-``docs/run-integrity.md``, v1.1.0) fixes the rule and the vocabulary. A trial that ended on its
+``docs/run-integrity.md``, v1.2.0) fixes the rule and the vocabulary. A trial that ended on its
 own records exactly one stop reason. A missing reason, one outside the vocabulary, one the plan
 does not allow, and a trial record that disagrees with the manifest are test-system findings.
 
@@ -27,6 +27,11 @@ writes it):
   is. A declaration that names no known stop reason is not used: the default applies and the
   summary says so. It can therefore never allow more than the default by being malformed.
 
+From 1.1.0 ``simulation-broken`` is never allowed, whatever the plan lists: a trial that records
+it is a ``disallowed-stop-reason`` finding with the summary "The stop reason simulation-broken is
+never allowed." The plan's list may still name it and is accepted; the name is ignored. 1.0.0 let a
+plan allow it, and ``version="1.0.0"`` selects that rule.
+
 Only trials that ``completeness`` found complete are judged on a manifest: a missing or
 hash-mismatched trial file stays a ``completeness`` finding and is not repeated here. Nothing in
 evidence 2.0.0 records a timeout or a crash (livingproof-sim-mujoco#105 and
@@ -44,7 +49,8 @@ from pathlib import Path
 from livingproof_evaluator_run.plain import shown
 
 TERMINATION_ID = "termination"
-TERMINATION_VERSION = "1.0.0"
+TERMINATION_VERSION = "1.1.0"
+PREVIOUS_VERSIONS = ("1.0.0",)
 # The contract's stop reason vocabulary.
 STOP_REASONS = (
     "time-limit",
@@ -101,6 +107,7 @@ class Outcome:
     judged: int = 0
     failing: int = 0
     notes: list[str] = field(default_factory=list)
+    version: str = TERMINATION_VERSION
 
     @property
     def percentage(self) -> float:
@@ -140,8 +147,14 @@ def allowed_stop_reasons(*declared: object) -> tuple[list[str], str | None]:
     )
 
 
-def judge(allowed: list[str], trials: list[Trial]) -> Outcome:
-    """Judge each trial that ended on its own. Findings follow the contract's order."""
+def judge(allowed: list[str], trials: list[Trial], version: str = TERMINATION_VERSION) -> Outcome:
+    """Judge each trial that ended on its own. Findings follow the contract's order.
+
+    From 1.1.0 ``simulation-broken`` is never allowed, so it is taken out of ``allowed``.
+    """
+    never = version != "1.0.0"
+    if never:
+        allowed = [name for name in allowed if name != "simulation-broken"]
     findings: list[dict] = []
     referrals: list[dict] = []
     judged = 0
@@ -174,13 +187,12 @@ def judge(allowed: list[str], trials: list[Trial]) -> Outcome:
             )
         elif reason not in allowed:
             failing.add(trial.id)
-            findings.append(
-                _finding(
-                    "disallowed-stop-reason",
-                    f"The stop reason {reason} is not one the plan allows.",
-                    trial.id,
-                )
+            text = (
+                f"The stop reason {reason} is never allowed."
+                if never and reason == "simulation-broken"
+                else f"The stop reason {reason} is not one the plan allows."
             )
+            findings.append(_finding("disallowed-stop-reason", text, trial.id))
         manifest = trial.manifest_stop_reason
         if reason is not None and manifest not in (None, reason):
             failing.add(trial.id)
@@ -191,7 +203,7 @@ def judge(allowed: list[str], trials: list[Trial]) -> Outcome:
                     trial.id,
                 )
             )
-    return Outcome(judged > 0, findings, referrals, judged, len(failing))
+    return Outcome(judged > 0, findings, referrals, judged, len(failing), version=version)
 
 
 def _recorded(value: object) -> str | None:
@@ -232,6 +244,7 @@ def from_evidence(
     planned: int,
     results: dict[int, dict],
     complete: set[int],
+    version: str = TERMINATION_VERSION,
 ) -> Outcome:
     """Check a ``livingproof-hallway-evidence/2.0.0`` manifest and its trial files.
 
@@ -255,7 +268,7 @@ def from_evidence(
                 manifest_stop_reason=_runner_word(row.get("outcome")),
             )
         )
-    outcome = judge(allowed, trials)
+    outcome = judge(allowed, trials, version)
     if not outcome.applicable:
         return _not_applicable(outcome, "no trial has an observation file to read")
     if note:
@@ -272,11 +285,13 @@ def _read(path: Path) -> dict:
     return document if isinstance(document, dict) else {}
 
 
-def from_request(integrity: dict) -> Outcome:
+def from_request(integrity: dict, version: str = TERMINATION_VERSION) -> Outcome:
     """Check ``integrity.evidence['termination']`` against each trial's ``termination``."""
     evidence = _dig(integrity, "evidence", TERMINATION_ID)
     if not isinstance(evidence, dict):
-        return _not_applicable(Outcome(False), "the request carries no termination evidence")
+        return _not_applicable(
+            Outcome(False, version=version), "the request carries no termination evidence"
+        )
     allowed, note = allowed_stop_reasons(evidence.get("allowed_stop_reasons"))
     recorded: dict[str, dict] = {}
     entries = evidence.get("trials")
@@ -298,7 +313,7 @@ def from_request(integrity: dict) -> Outcome:
                 manifest_stop_reason=_recorded(entry.get("manifest_stop_reason")),
             )
         )
-    outcome = judge(allowed, trials)
+    outcome = judge(allowed, trials, version)
     if not outcome.applicable:
         return _not_applicable(outcome, "no trial ended on its own")
     if note:

@@ -355,6 +355,16 @@ def test_blank_trial_id_is_caught_when_recording_findings_overflow_the_cap(
     # findings overflow the cap and would drop the blank from the descriptor if they were not
     # counted.
     request = json.loads((EXAMPLES / "recording" / "findings" / "request.json").read_text())
+    # The published request is a 1.0.0 one: a present trial whose evidence says incomplete, which
+    # 1.1.0 rejects. Say it as 1.1.0 does: the file is truncated, so completeness reports it.
+    incomplete = {
+        entry["id"]
+        for entry in request["integrity"]["evidence"]["recording"]["trials"]
+        if entry["mcap"]["state"] != "complete"
+    }
+    for trial in request["integrity"]["trials"]:
+        if trial["id"] in incomplete:
+            trial["recording"]["state"] = "truncated"
     source = tmp_path / "request.json"
     source.write_text(json.dumps(request), encoding="utf-8")
     probe = tmp_path / "probe.json"

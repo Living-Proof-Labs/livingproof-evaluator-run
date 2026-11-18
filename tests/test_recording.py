@@ -138,12 +138,13 @@ def test_a_clean_run_with_media_passes(tmp_path: Path) -> None:
     document, check = _doctored(tmp_path)
     assert check == {
         "id": "recording",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": True,
         "success": True,
         "percentage": 100,
         "limits": {"max_gap_seconds": LIMIT},
         "findings": [],
+        "not_checked": [],
     }
     assert document["integrity"]["run"]["success"] is True
     assert base._validate(document) == []
@@ -154,10 +155,11 @@ def test_no_media_is_not_applicable(tmp_path: Path) -> None:
     document = _run(folder, tmp_path, None)
     assert _check(document) == {
         "id": "recording",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": False,
         "success": True,
         "findings": [],
+        "not_checked": [],
     }
     assert document["integrity"]["run"]["percentage"] == 100
     # No media directory at all is not a finding about the run, so the card carries no note.
@@ -236,8 +238,11 @@ def test_no_declared_limit_means_not_applicable_even_with_media(tmp_path: Path) 
     check = _check(document)
     assert check["applicable"] is False
     assert check["findings"] == [] and "limits" not in check
-    text = document["descriptor"]["success_copy"]
+    assert check["not_checked"] == []
+    # The truncated trial is completeness's, so the run has a finding and reads details_copy.
+    text = document["descriptor"]["details_copy"]
     assert "max_gap_seconds" in text and "no default" in text
+    assert "not recorded" not in text
 
 
 def test_a_manifest_with_no_recording_declaration_at_all(tmp_path: Path) -> None:
@@ -351,42 +356,138 @@ def test_the_summary_says_the_default_channels_were_used(tmp_path: Path) -> None
 # Each category.
 
 
-def test_a_truncated_recording_is_incomplete(tmp_path: Path) -> None:
+def _completeness(document: dict) -> dict[str, str]:
+    return {i["trial_id"]: i["category"] for i in _check(document, "completeness")["findings"]}
+
+
+def _not_checked(check: dict) -> list[tuple[str, str]]:
+    return [(i["trial_id"], i["reason"]) for i in check["not_checked"]]
+
+
+def test_a_truncated_recording_is_completeness_s_and_recording_does_not_judge_it(
+    tmp_path: Path,
+) -> None:
+    """recording 1.1.0: a file with no valid footer is truncated. completeness reports it and the
+    run is incomplete; recording lists the trial as not-present and judges nothing about it, so
+    it is reported once and never as mcap-incomplete (livingproof-evaluator#34, PR 37)."""
     document, check = _doctored(tmp_path, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
-    assert "mcap-incomplete" in _categories(check)
-    first = check["findings"][0]
-    assert first["trial_id"] == "trial-02"
-    assert first["summary"] == "The recording does not open or has no valid footer and summary."
-    assert first["classification"] == "test_system"
+    assert check["findings"] == []
+    assert _not_checked(check) == [("trial-02", "not-present")]
+    assert check["percentage"] == 100
+    assert _completeness(document) == {"trial-02": "truncated-recording"}
+    summary = _check(document, "completeness")["findings"][0]["summary"]
+    assert summary == "Trial trial-02 has a truncated recording."
     _conforming_error(document)
 
 
-def test_a_truncated_recording_is_reported_once_not_as_a_missing_channel_per_channel(
+def test_a_truncated_recording_is_one_report_not_a_missing_channel_per_channel(
     tmp_path: Path,
 ) -> None:
-    """The cause reads clearly (livingproof-evaluator#34): one mcap-incomplete finding for the
-    truncated trial, not also a missing-channel for each required channel the reader never saw."""
-    _, check = _doctored(tmp_path, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
-    assert _categories(check) == ["mcap-incomplete"]
-    assert [item["trial_id"] for item in check["findings"]] == ["trial-02"]
-    assert check["percentage"] == pytest.approx(100 * 2 / 3)
+    """The cause reads clearly (livingproof-evaluator#34): one report of the truncated trial, by
+    completeness, and nothing from recording, not even a missing-channel per required channel."""
+    document, check = _doctored(tmp_path, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
+    reported = [
+        (c["id"], i["trial_id"], i["category"]) for c in _checks(document) for i in c["findings"]
+    ]
+    assert reported == [("completeness", "trial-02", "truncated-recording")]
+    assert check["percentage"] == 100
 
 
-def test_a_truncated_recording_that_also_differs_from_media_json_says_both(tmp_path: Path) -> None:
+def test_a_truncated_recording_that_also_differs_from_media_json_is_still_only_completeness(
+    tmp_path: Path,
+) -> None:
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder)
     rec.truncate(media / "mcap" / "trial-02.mcap")
-    check = _check(_run(folder, tmp_path, media))
-    assert _categories(check) == ["mcap-incomplete", "media-file-mismatch"]
+    document = _run(folder, tmp_path, media)
+    assert _check(document)["findings"] == []
+    assert _completeness(document) == {"trial-02": "truncated-recording"}
 
 
-def test_a_recording_that_is_not_an_mcap_is_not_also_a_missing_channel(tmp_path: Path) -> None:
+def test_a_recording_that_is_not_an_mcap_is_truncated_and_not_a_missing_channel(
+    tmp_path: Path,
+) -> None:
     def edit(index: int, path: Path) -> None:
         if index == 1:
             path.write_bytes(b"this is not a recording")
 
-    _, check = _doctored(tmp_path, edit=edit)
-    assert _categories(check) == ["mcap-incomplete"]
+    document, check = _doctored(tmp_path, edit=edit)
+    assert check["findings"] == []
+    assert _not_checked(check) == [("trial-01", "not-present")]
+    assert _completeness(document) == {"trial-01": "truncated-recording"}
+
+
+def test_an_empty_recording_is_completeness_s_empty_recording(tmp_path: Path) -> None:
+    document, check = _doctored(tmp_path, edit=lambda i, p: p.write_bytes(b"") if i == 3 else None)
+    assert check["findings"] == []
+    assert _not_checked(check) == [("trial-03", "not-present")]
+    assert _completeness(document) == {"trial-03": "empty-recording"}
+    summary = _check(document, "completeness")["findings"][0]["summary"]
+    assert summary == "Trial trial-03 has an empty recording."
+
+
+def test_a_1_1_0_recording_check_never_reports_mcap_incomplete(tmp_path: Path) -> None:
+    edits = (
+        lambda i, p: rec.truncate(p) if i == 1 else None,
+        lambda i, p: rec.without_summary(p) if i == 2 else None,
+        lambda i, p: p.write_bytes(b"x") if i == 3 else None,
+    )
+    for number, edit in enumerate(edits):
+        (tmp_path / str(number)).mkdir()
+        document, check = _doctored(tmp_path / str(number), edit=edit)
+        assert "mcap-incomplete" not in _categories(check)
+        assert check["version"] == "1.1.0"
+        found = [f["category"] for c in _checks(document) for f in c["findings"]]
+        assert "mcap-incomplete" not in found
+
+
+def test_version_1_0_0_still_judges_a_file_with_no_valid_footer_as_the_contract_published() -> None:
+    """1.0.0 stays selectable: it judges the file, reports mcap-incomplete and a missing-channel
+    for each required channel, as the contract's 1.0.0 rule does."""
+    recording = module()
+    trial = recording.Trial("t", False, 10, "a" * 64, [], 10, "a" * 64, "b" * 64, "b" * 64)
+    outcome = recording.judge(["/base_pose", "/joint_states"], 0.1, [trial], "1.0.0")
+    assert [f["category"] for f in outcome.findings] == [
+        "mcap-incomplete",
+        "missing-channel",
+        "missing-channel",
+    ]
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
+
+
+def test_version_1_0_0_from_evidence_reports_a_truncated_file_once(tmp_path: Path) -> None:
+    """On the evidence path, 1.0.0 still reports a file the reader could not read as a single
+    mcap-incomplete, with no missing-channel (PR 16's truncation-once). The request path and
+    judge() without the flag keep the contract's extra missing-channel findings."""
+    folder = _evidence(tmp_path, channels=["/base_pose", "/joint_states"])
+    media = _media(tmp_path, folder, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    results = {row["index"]: row for row in manifest["trials"]["results"]}
+    outcome = module().from_evidence(manifest, media, 3, results, "1.0.0")
+    assert [f["category"] for f in outcome.findings] == ["mcap-incomplete"]
+    assert outcome.findings[0]["trial_id"] == "trial-02"
+    assert "size limit" not in outcome.findings[0]["summary"]  # footer-less, not over-cap
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
+
+
+def test_version_1_0_0_from_evidence_reports_an_over_cap_file_once(tmp_path: Path) -> None:
+    """The same truncation-once rule covers a file the reader refused for size: one
+    mcap-incomplete, no missing-channel. Rivet's PR 19 rule for selectable 1.0.0."""
+    import bombs
+
+    def swap(index: int, path: Path) -> None:
+        if index == 2:
+            path.write_bytes(bombs.mcap_with_chunk(bombs.zeros_zstd(1 << 28)))
+
+    folder = _evidence(tmp_path, channels=["/base_pose", "/joint_states"])
+    media = _media(tmp_path, folder, edit=swap)
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    results = {row["index"]: row for row in manifest["trials"]["results"]}
+    outcome = module().from_evidence(manifest, media, 3, results, "1.0.0")
+    assert [f["category"] for f in outcome.findings] == ["mcap-incomplete"]
+    assert outcome.findings[0]["trial_id"] == "trial-02"
+    assert "size limit" in outcome.findings[0]["summary"]
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
 
 
 def test_a_complete_recording_with_a_missing_channel_is_still_a_missing_channel(
@@ -418,20 +519,13 @@ def test_a_real_hole_is_still_a_gap_when_messages_are_written_out_of_order(tmp_p
     assert _categories(check) == ["timestamps-backwards", "message-gap-exceeded"]
 
 
-def test_a_recording_without_a_summary_is_incomplete(tmp_path: Path) -> None:
-    _, check = _doctored(tmp_path, edit=lambda i, p: rec.without_summary(p) if i == 3 else None)
-    assert _categories(check) == ["mcap-incomplete"]
-    assert check["findings"][0]["trial_id"] == "trial-03"
-
-
-def test_a_recording_that_is_not_an_mcap_is_incomplete(tmp_path: Path) -> None:
-    def edit(index: int, path: Path) -> None:
-        if index == 1:
-            path.write_bytes(b"this is not a recording")
-
-    _, check = _doctored(tmp_path, edit=edit)
-    assert _categories(check)[0] == "mcap-incomplete"
-    assert {i["trial_id"] for i in check["findings"]} == {"trial-01"}
+def test_a_recording_without_a_summary_is_truncated(tmp_path: Path) -> None:
+    document, check = _doctored(
+        tmp_path, edit=lambda i, p: rec.without_summary(p) if i == 3 else None
+    )
+    assert check["findings"] == []
+    assert _not_checked(check) == [("trial-03", "not-present")]
+    assert _completeness(document) == {"trial-03": "truncated-recording"}
 
 
 def test_a_missing_channel_is_a_finding_for_that_trial(tmp_path: Path) -> None:
@@ -601,13 +695,16 @@ def test_the_checks_are_reported_in_order(tmp_path: Path) -> None:
 
 
 def test_recording_findings_leave_the_trial_statuses_to_completeness(tmp_path: Path) -> None:
-    document, check = _doctored(tmp_path, edit=lambda i, p: rec.truncate(p) if i == 1 else None)
+    document, check = _doctored(tmp_path, channels=_gap_at(10, 200_000_000))
     assert check["findings"]
     assert [t["test_system_status"] for t in document["integrity"]["trials"]] == ["COMPLETED"] * 3
     assert _check(document, "completeness")["findings"] == []
 
 
 def test_a_recording_is_judged_only_when_its_file_is_present(tmp_path: Path) -> None:
+    """A listed recording whose file is missing is not judged and is not a clean one: recording
+    lists it as not-present and completeness reports missing-recording, so the run reads ERROR
+    where it used to read COMPLETED and 100 (livingproof-evaluator-run#18)."""
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder)
     (media / "mcap" / "trial-03.mcap").unlink()
@@ -615,21 +712,52 @@ def test_a_recording_is_judged_only_when_its_file_is_present(tmp_path: Path) -> 
     check = _check(document)
     assert check["applicable"] is True and check["findings"] == []
     assert check["percentage"] == 100
-    assert "trial-03" in document["descriptor"]["success_copy"]
-    assert "Not checked" in document["descriptor"]["success_copy"]
+    assert _not_checked(check) == [("trial-03", "not-present")]
+    assert _completeness(document) == {"trial-03": "missing-recording"}
+    completeness = _check(document, "completeness")
+    assert completeness["percentage"] == pytest.approx(100 * 2 / 3)
+    run = document["integrity"]["run"]
+    assert (run["test_system_status"], run["conclusion"]) == ("ERROR", "INCONCLUSIVE")
+    assert "Not checked: recording of trial-03" in document["descriptor"]["details_copy"]
+    _conforming_error(document)
+
+
+def test_a_trial_media_json_does_not_list_is_not_recorded_and_completeness_stays_clean(
+    tmp_path: Path,
+) -> None:
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder, indexes=(1, 2))
+    document = _run(folder, tmp_path, media)
+    check = _check(document)
+    assert check["findings"] == [] and check["percentage"] == 100
+    assert _not_checked(check) == [("trial-03", "not-recorded")]
+    assert _check(document, "completeness")["findings"] == []
+    assert document["integrity"]["run"]["success"] is True
+    assert (
+        "Not checked: recording of trial-03 (not recorded)."
+        in (document["descriptor"]["success_copy"])
+    )
+    assert base._validate(document) == []
 
 
 def test_a_missing_recording_is_not_a_recording_finding(tmp_path: Path) -> None:
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder, edit=lambda i, p: rec.truncate(p) if i == 2 else None)
     (media / "mcap" / "trial-01.mcap").unlink()
-    check = _check(_run(folder, tmp_path, media))
-    assert {i["trial_id"] for i in check["findings"]} == {"trial-02"}
-    assert _categories(check)[0] == "mcap-incomplete"
-    assert check["percentage"] == pytest.approx(50)
+    document = _run(folder, tmp_path, media)
+    check = _check(document)
+    assert check["findings"] == []
+    assert _not_checked(check) == [("trial-01", "not-present"), ("trial-02", "not-present")]
+    assert check["percentage"] == 100
+    assert _completeness(document) == {
+        "trial-01": "missing-recording",
+        "trial-02": "truncated-recording",
+    }
 
 
-def test_with_no_recording_present_nothing_is_judged(tmp_path: Path) -> None:
+def test_with_no_recording_present_nothing_is_judged_and_completeness_says_why(
+    tmp_path: Path,
+) -> None:
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder)
     for path in (media / "mcap").iterdir():
@@ -637,7 +765,10 @@ def test_with_no_recording_present_nothing_is_judged(tmp_path: Path) -> None:
     document = _run(folder, tmp_path, media)
     check = _check(document)
     assert check["applicable"] is False and check["findings"] == [] and "limits" not in check
-    assert document["integrity"]["run"]["percentage"] == 100
+    assert _not_checked(check) == [(f"trial-0{i}", "not-present") for i in (1, 2, 3)]
+    assert _completeness(document) == {f"trial-0{i}": "missing-recording" for i in (1, 2, 3)}
+    assert document["integrity"]["run"]["percentage"] == 0
+    assert base._validate(document) == []
 
 
 def test_a_recording_for_a_trial_the_plan_does_not_have_is_not_judged(tmp_path: Path) -> None:
@@ -664,13 +795,16 @@ def test_a_recording_path_that_leaves_the_media_directory_is_not_read(
     check = _check(document)
     assert "trial-01" not in {i["trial_id"] for i in check["findings"]}
     assert check["percentage"] == 100
+    assert _not_checked(check) == [("trial-01", "not-present")]
+    assert _completeness(document) == {"trial-01": "missing-recording"}
 
 
 def test_a_media_json_with_a_malformed_trial_list_is_not_applicable(tmp_path: Path) -> None:
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder)
     rec.edit_media(media, lambda d: d.update(trials="nope"))
-    assert _check(_run(folder, tmp_path, media))["applicable"] is False
+    check = _check(_run(folder, tmp_path, media))
+    assert check["applicable"] is False and check["not_checked"] == []
 
 
 def test_text_from_evidence_is_shown_escaped(tmp_path: Path) -> None:
@@ -689,8 +823,7 @@ def test_the_descriptor_keeps_what_was_not_checked_when_the_summary_is_long(
     """The success copy is at most 400 characters. When the checks' sentences do not all fit, the
     sentences that say a check passed give way; a note about what was not checked never does."""
     folder = _evidence(tmp_path)
-    media = _media(tmp_path, folder)
-    (media / "mcap" / "trial-03.mcap").unlink()
+    media = _media(tmp_path, folder, indexes=(1, 2))
     document = _run(folder, tmp_path, media)
     copy = document["descriptor"]["success_copy"]
     assert len(copy) <= 400
@@ -703,7 +836,9 @@ def test_the_command_line_takes_the_media_directory(tmp_path: Path) -> None:
     media = _media(tmp_path, folder, edit=lambda i, p: rec.truncate(p) if i == 1 else None)
     out = tmp_path / "result.json"
     assert main([str(folder / "manifest.json"), "--media", str(media), "--out", str(out)]) == 0
-    assert "mcap-incomplete" in _categories(_check(json.loads(out.read_text(encoding="utf-8"))))
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert _categories(_check(result)) == []
+    assert _completeness(result) == {"trial-01": "truncated-recording"}
     out2 = tmp_path / "result2.json"
     assert main([str(folder / "manifest.json"), "--out", str(out2)]) == 0
     assert _check(json.loads(out2.read_text(encoding="utf-8")))["applicable"] is False
@@ -786,27 +921,70 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("name", ["clean", "findings", "no-media"])
+def _as_1_1_0(check: dict, request: dict) -> dict:
+    """The contract keeps its 1.0.0 examples as published. A 1.0.0 check read as 1.1.0 changes
+    its version and gains the ``not_checked`` the reference rule derives from the request."""
+    if check["version"] != "1.0.0":
+        return check
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    rule = integrity_rules.recording(request["integrity"], "1.1.0")
+    return {**check, "version": "1.1.0", "not_checked": rule["not_checked"]}
+
+
+@pytest.mark.parametrize("name", ["clean", "no-media", "not-checked", "none-judged"])
 def test_the_contract_examples_give_the_contract_checks(name: str, tmp_path: Path) -> None:
-    document = _run_request(_request(name), tmp_path)
+    request = _request(name)
+    document = _run_request(request, tmp_path)
     expected = json.loads((EXAMPLES / name / "result.json").read_text(encoding="utf-8"))
     for check in _checks(expected):
-        assert _check(document, check["id"]) == check
+        assert _check(document, check["id"]) == _as_1_1_0(check, request)
     assert document["integrity"]["trials"] == expected["integrity"]["trials"]
     assert document["integrity"]["run"] == expected["integrity"]["run"]
     assert base._validate(document) == []
 
 
+def test_a_1_1_0_request_with_a_present_recording_the_evidence_calls_incomplete_is_malformed(
+    tmp_path: Path,
+) -> None:
+    """The published 1.0.0 ``recording/findings`` request has a present trial whose evidence says
+    incomplete. At 1.1.0 that is inconsistent: the evaluator exits 2 and writes no result
+    (livingproof-evaluator-run#18, decision 14)."""
+    request = _request("findings")
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert evaluate(source, out) == 2
+    assert not out.exists()
+    assert main([str(source), "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+def test_the_published_1_0_0_findings_request_is_still_judged_at_1_0_0() -> None:
+    request = _request("findings")
+    expected = json.loads((EXAMPLES / "findings" / "result.json").read_text(encoding="utf-8"))
+    want = _check(expected)
+    assert want["version"] == "1.0.0"
+    outcome = module().from_request(request["integrity"], "1.0.0")
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
+    assert outcome.findings == want["findings"]
+    assert outcome.percentage == pytest.approx(want["percentage"])
+    assert outcome.limits == want["limits"]
+    with pytest.raises(module().MalformedRequest):
+        module().from_request(request["integrity"])
+
+
 def test_only_recordings_completeness_reports_as_present_are_judged(tmp_path: Path) -> None:
     request = _request("findings")
-    document = _run_request(request, tmp_path)
-    judged = {i["trial_id"] for i in _check(document)["findings"]}
+    outcome = module().from_request(request["integrity"], "1.0.0")
+    judged = {i["trial_id"] for i in outcome.findings}
     assert "trial-absent-file" not in judged
     present = [
         t["id"] for t in request["integrity"]["trials"] if t["recording"]["state"] == "present"
     ]
     assert len(present) == 7
-    assert _check(document)["percentage"] == pytest.approx(100 * 1 / 7)
+    assert outcome.percentage == pytest.approx(100 * 1 / 7)
 
 
 def test_a_missing_recording_with_findings_in_the_evidence_is_still_not_judged(
@@ -816,8 +994,11 @@ def test_a_missing_recording_with_findings_in_the_evidence_is_still_not_judged(
     request["integrity"]["trials"][0]["recording"] = {"state": "missing"}
     evidence = request["integrity"]["evidence"]["recording"]["trials"][0]
     evidence["mcap"]["state"] = "incomplete"
-    check = _check(_run_request(request, tmp_path))
+    document = _run_request(request, tmp_path)
+    check = _check(document)
     assert check["findings"] == [] and check["percentage"] == 100
+    assert _not_checked(check) == [(request["integrity"]["trials"][0]["id"], "not-present")]
+    assert _completeness(document) == {request["integrity"]["trials"][0]["id"]: "missing-recording"}
 
 
 def test_a_request_without_recording_evidence_is_not_applicable(tmp_path: Path) -> None:
@@ -826,10 +1007,11 @@ def test_a_request_without_recording_evidence_is_not_applicable(tmp_path: Path) 
     check = _check(_run_request(request, tmp_path))
     assert check == {
         "id": "recording",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "applicable": False,
         "success": True,
         "findings": [],
+        "not_checked": [],
     }
 
 
@@ -861,7 +1043,7 @@ def _random_request(rng: random.Random) -> dict:
     trials, entries = [], []
     for i in range(n):
         trial_id = f"t{i}"
-        state = rng.choice(["present"] * 4 + ["missing"])
+        state = rng.choice(["present"] * 4 + ["missing", "truncated", "empty"])
         trials.append({"id": trial_id, "recording": {"state": state}})
         if rng.random() < 0.1:
             continue
@@ -902,20 +1084,39 @@ def _random_request(rng: random.Random) -> dict:
     return {"trials": trials, "evidence": {"recording": evidence}}
 
 
-def test_ours_equal_the_contract_reference_rules() -> None:
+def _reference(integrity_rules, request: dict, version: str):
+    try:
+        return integrity_rules.recording(request, version)
+    except integrity_rules.MalformedRequest:
+        return None
+
+
+@pytest.mark.parametrize("version", ["1.1.0", "1.0.0"])
+def test_ours_equal_the_contract_reference_rules(version: str) -> None:
+    """Each version against the reference rule of that version (the reference defaults to
+    1.1.0, so the version is always passed). At 1.1.0 an inconsistent request is rejected by
+    both, and only by both."""
     sys.path.insert(0, str(base.CONTRACT / "tests"))
     import integrity_rules
 
     recording = module()
     rng = random.Random(8)
     seen: set[str] = set()
-    not_applicable = 0
-    for _ in range(600):
+    not_applicable = rejected = 0
+    reasons: set[str] = set()
+    for _ in range(900):
         request = _random_request(rng)
-        expected = integrity_rules.recording(request)
-        outcome = recording.from_request(request)
+        expected = _reference(integrity_rules, request, version)
+        if expected is None:
+            with pytest.raises(recording.MalformedRequest):
+                recording.from_request(request, version)
+            rejected += 1
+            continue
+        outcome = recording.from_request(request, version)
+        assert outcome.version == version
         assert outcome.applicable is expected["applicable"], request
         assert outcome.findings == expected["findings"], request
+        assert outcome.not_checked == expected.get("not_checked"), request
         if expected["applicable"]:
             assert outcome.percentage == pytest.approx(expected["percentage"]), request
             assert outcome.limits == expected["limits"], request
@@ -923,8 +1124,36 @@ def test_ours_equal_the_contract_reference_rules() -> None:
             assert outcome.limits is None
             not_applicable += 1
         seen.update(item["category"] for item in expected["findings"])
-    assert seen == set(CATEGORIES)
+        reasons.update(item["reason"] for item in expected.get("not_checked", []))
+    if version == "1.0.0":
+        assert seen == set(CATEGORIES)
+        assert rejected == 0 and not reasons
+    else:
+        assert seen == set(CATEGORIES) - {"mcap-incomplete"}
+        assert rejected > 20
+        assert reasons == {"not-present", "not-recorded"}
     assert not_applicable > 20
+
+
+def test_the_default_version_is_the_current_one_and_is_the_references_default() -> None:
+    sys.path.insert(0, str(base.CONTRACT / "tests"))
+    import integrity_rules
+
+    recording = module()
+    rng = random.Random(9)
+    assert recording.RECORDING_VERSION == "1.1.0"
+    compared = 0
+    for _ in range(200):
+        request = _random_request(rng)
+        try:
+            expected = integrity_rules.recording(request)
+        except integrity_rules.MalformedRequest:
+            with pytest.raises(recording.MalformedRequest):
+                recording.from_request(request)
+            continue
+        assert recording.from_request(request).not_checked == expected["not_checked"]
+        compared += 1
+    assert compared > 50
 
 
 # Cases the first pass left open (found by mutating the code).
@@ -940,7 +1169,9 @@ def test_a_recording_that_is_a_link_out_of_the_media_directory_is_not_read(tmp_p
     target.symlink_to(outside)
     document = _run(folder, tmp_path, media)
     assert "trial-01" not in {i["trial_id"] for i in _check(document)["findings"]}
-    assert "trial-01 (no file to read)" in document["descriptor"]["success_copy"]
+    assert _not_checked(_check(document)) == [("trial-01", "not-present")]
+    assert _completeness(document) == {"trial-01": "missing-recording"}
+    assert "trial-01 (not present)" in document["descriptor"]["details_copy"]
 
 
 @pytest.mark.parametrize("bad", [0, -1, -0.5, "0.1", True, None, float("nan"), float("inf")])
