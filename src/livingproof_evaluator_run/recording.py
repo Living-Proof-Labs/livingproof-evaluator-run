@@ -48,6 +48,11 @@ from livingproof_evaluator_run.plain import shown
 
 RECORDING_ID = "recording"
 RECORDING_VERSION = "1.0.0"
+# What an ``mcap-incomplete`` finding says when the reader refused the file for its size
+# (``mcap_reader.Caps``) instead of failing to open it.
+CAP_SUMMARY = (
+    "The recording expands past the evaluator's size limit when decompressed, so it was not read."
+)
 # The contract's category enum, in the order the rules report them within a trial.
 CATEGORIES = (
     "mcap-incomplete",
@@ -88,6 +93,7 @@ class Trial:
     media_sha256: object
     media_observation_sha256: object
     evidence_observation_sha256: object
+    cap_exceeded: bool = False
 
 
 @dataclass
@@ -170,7 +176,9 @@ def judge(
             mine.append(
                 _finding(
                     "mcap-incomplete",
-                    "The recording does not open or has no valid footer and summary.",
+                    CAP_SUMMARY
+                    if trial.cap_exceeded
+                    else "The recording does not open or has no valid footer and summary.",
                     trial.id,
                 )
             )
@@ -409,6 +417,7 @@ def from_evidence(
             Trial(
                 id=trial_id,
                 complete=inspection.complete,
+                cap_exceeded=inspection.cap_exceeded,
                 bytes=path.stat().st_size,
                 sha256=_digest(path),
                 channels=[
