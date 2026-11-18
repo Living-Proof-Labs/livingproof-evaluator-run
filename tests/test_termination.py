@@ -160,6 +160,7 @@ def test_checks_are_reported_in_order(tmp_path: Path) -> None:
         "pins",
         "plan-conformance",
         CHECK,
+        "recording",
     ]
 
 
