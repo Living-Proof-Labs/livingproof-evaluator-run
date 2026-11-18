@@ -54,6 +54,8 @@ class Outcome:
     failing: int = 0
     # Plain text for the descriptor: why nothing was compared, or what was left out.
     notes: list[str] = field(default_factory=list)
+    # True when the plan was compared with the lock's plan.
+    with_lock: bool = False
 
     @property
     def percentage(self) -> float:
@@ -197,7 +199,7 @@ def conformance(
             )
 
     notes = [] if has_lock else ["Not checked: the plan against the lock."]
-    return Outcome(True, findings, subjects, failing, notes)
+    return Outcome(True, findings, subjects, failing, notes, with_lock=has_lock)
 
 
 def _dig(document: object, *path: str) -> object:

@@ -288,9 +288,10 @@ def _plan_conformance(outcome: plan_conformance.Outcome) -> Report:
             for item in outcome.findings
         ]
         return Report(check, notes=outcome.notes, shown=shown)
+    agree = "The plan, the trials and the lock" if outcome.with_lock else "The plan and the trials"
     return Report(
         check,
-        success_copy="The plan, the trials and the lock agree on the trial count.",
+        success_copy=f"{agree} agree on the trial count.",
         notes=outcome.notes,
     )
 
