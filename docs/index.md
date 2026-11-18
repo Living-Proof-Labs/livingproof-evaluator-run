@@ -50,7 +50,10 @@ out of scope for this check.
 Values copied from evidence into the summary are shown escaped and shortened to 100
 characters (a newline as `\x0a`, `<` as `\u003c`), so the result always matches the
 contract's descriptor plain-text pattern. If a descriptor still would not match, the
-command exits 1 and writes no result.
+command exits 1 and writes no result. The same holds for lengths: in the descriptor a
+finding's trial is cut to 40 characters and its text to 280, ending in an ellipsis (the
+check's own findings keep the full trial id), and a descriptor field over the contract's
+maximum length also exits 1 with nothing written.
 
 Start with this scope and the [verification limits](verification.md). To propose
 behavior, use
