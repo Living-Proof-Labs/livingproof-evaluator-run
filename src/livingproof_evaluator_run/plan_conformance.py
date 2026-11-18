@@ -1,7 +1,7 @@
-"""plan-conformance 1.0.0: the trials that ran are the trials that were planned.
+"""plan-conformance 1.1.0: the trials that ran are the trials that were planned.
 
 The contract (livingproof-evaluator ``schema/integrity/checks/plan-conformance.schema.json``
-and ``docs/run-integrity.md``, v1.1.0) fixes the rule. The plan's trial count, ``trials.count``,
+and ``docs/run-integrity.md``, v1.2.0) fixes the rule. The plan's trial count, ``trials.count``,
 the number of ``trials.results`` entries and the lock's own plan trial count agree. The plan's
 ``command_speed`` equals the lock's. ``trials.results[].index`` is exactly 1 to N, and each
 ``path`` is ``trials/trial-NN.json`` for its own index.
@@ -14,6 +14,12 @@ grades the robot.
 speed when both the plan and the lock record one, one per index 1 to N, and one per result entry
 whose index is outside 1 to N. The share is the subjects without a finding over all subjects.
 The lock comparisons are not made, and not counted, when there is no lock to compare with.
+
+From 1.1.0 the comparisons that were not made are listed in ``not_checked``, as ``lock-trial-count``
+and ``lock-command-speed`` with the reason ``not-declared``: the first when the manifest embeds no
+lock plan, the second when there is no lock plan, or the plan or the lock records no command
+speed. The field is required at 1.1.0 and empty when every comparison was made; the percentage rule
+is the one 1.0.0 already followed. ``version="1.0.0"`` selects 1.0.0, which has no ``not_checked``.
 
 The evidence is the contract's ``evidence['plan-conformance']``. ``from_evidence`` builds it
 from a ``livingproof-hallway-evidence/2.0.0`` manifest, ``from_request`` reads it from a
@@ -32,7 +38,8 @@ from dataclasses import dataclass, field
 from livingproof_evaluator_run.plain import shown
 
 PLAN_CONFORMANCE_ID = "plan-conformance"
-PLAN_CONFORMANCE_VERSION = "1.0.0"
+PLAN_CONFORMANCE_VERSION = "1.1.0"
+PREVIOUS_VERSIONS = ("1.0.0",)
 # The contract's category enum.
 CATEGORIES = (
     "trial-count-mismatch",
@@ -56,6 +63,9 @@ class Outcome:
     notes: list[str] = field(default_factory=list)
     # True when the plan was compared with the lock's plan.
     with_lock: bool = False
+    version: str = PLAN_CONFORMANCE_VERSION
+    # The comparisons not made, as the contract's ``not_checked`` items. None at 1.0.0.
+    not_checked: list[dict] | None = None
 
     @property
     def percentage(self) -> float:
@@ -63,8 +73,13 @@ class Outcome:
         return 100 * (self.subjects - self.failing) / self.subjects
 
 
-def _not_applicable(reason: str) -> Outcome:
-    return Outcome(applicable=False, notes=[f"Not checked: plan-conformance, {reason}."])
+def _not_applicable(reason: str, version: str = PLAN_CONFORMANCE_VERSION) -> Outcome:
+    return Outcome(
+        applicable=False,
+        notes=[f"Not checked: plan-conformance, {reason}."],
+        version=version,
+        not_checked=None if version == "1.0.0" else [],
+    )
 
 
 def _int(value: object) -> bool:
@@ -123,6 +138,7 @@ def conformance(
     lock_count: int | None,
     lock_speed: object,
     has_lock: bool,
+    version: str = PLAN_CONFORMANCE_VERSION,
 ) -> Outcome:
     """Compare the plan with the trials and the lock. Findings come in the contract's order:
     the counts, the command speed, then each index 1 to N, then each entry out of range."""
@@ -146,7 +162,8 @@ def conformance(
                 )
             )
 
-    if plan_speed is not NO_SPEED and lock_speed is not NO_SPEED:
+    speed_compared = plan_speed is not NO_SPEED and lock_speed is not NO_SPEED
+    if speed_compared:
         subjects += 1
         if not _same_speed(plan_speed, lock_speed):
             failing += 1
@@ -198,8 +215,25 @@ def conformance(
                 )
             )
 
+    # The lock comparisons that were not made are not subjects either, and are listed.
+    not_checked: list[dict] | None = None
+    if version != "1.0.0":
+        not_checked = []
+        if lock_count is None:
+            not_checked.append({"subject": "lock-trial-count", "reason": "not-declared"})
+        if not speed_compared:
+            not_checked.append({"subject": "lock-command-speed", "reason": "not-declared"})
     notes = [] if has_lock else ["Not checked: the plan against the lock."]
-    return Outcome(True, findings, subjects, failing, notes, with_lock=has_lock)
+    return Outcome(
+        True,
+        findings,
+        subjects,
+        failing,
+        notes,
+        with_lock=has_lock,
+        version=version,
+        not_checked=not_checked,
+    )
 
 
 def _dig(document: object, *path: str) -> object:
@@ -225,19 +259,19 @@ def _unmet(preconditions: object) -> bool:
     )
 
 
-def from_evidence(manifest: dict) -> Outcome:
+def from_evidence(manifest: dict, version: str = PLAN_CONFORMANCE_VERSION) -> Outcome:
     """Check a ``livingproof-hallway-evidence/2.0.0`` manifest, with its embedded lock if any."""
     if _unmet(manifest.get("preconditions")):
-        return _not_applicable("the run's preconditions were unmet and it ran no trials")
+        return _not_applicable("the run's preconditions were unmet and it ran no trials", version)
     planned = _dig(manifest, "plan", "trials", "count")
     trials_count = _dig(manifest, "trials", "count")
     results = _dig(manifest, "trials", "results")
     if not _int(planned) or planned < 0:
-        return _not_applicable("the plan records no trial count")
+        return _not_applicable("the plan records no trial count", version)
     if not _int(trials_count):
-        return _not_applicable("the evidence records no trials.count")
+        return _not_applicable("the evidence records no trials.count", version)
     if not isinstance(results, list):
-        return _not_applicable("the evidence records no trials.results list")
+        return _not_applicable("the evidence records no trials.results list", version)
     lock_plan = _dig(manifest, "lock", "content", "plan")
     lock_plan = lock_plan if isinstance(lock_plan, dict) else None
     lock_count = _dig(lock_plan, "trials", "count")
@@ -249,25 +283,26 @@ def from_evidence(manifest: dict) -> Outcome:
         lock_count=lock_count if _int(lock_count) else None,
         lock_speed=_speed(_dig(lock_plan, "command_speed")),
         has_lock=lock_plan is not None,
+        version=version,
     )
 
 
-def from_request(integrity: dict) -> Outcome:
+def from_request(integrity: dict, version: str = PLAN_CONFORMANCE_VERSION) -> Outcome:
     """Check ``integrity.evidence['plan-conformance']`` of a livingproof-evaluator-request."""
     evidence = _dig(integrity, "evidence", PLAN_CONFORMANCE_ID)
     if not isinstance(evidence, dict):
-        return _not_applicable("the request carries no plan-conformance evidence")
+        return _not_applicable("the request carries no plan-conformance evidence", version)
     if _dig(evidence, "preconditions", "met") is False:
-        return _not_applicable("the run's preconditions were unmet and it ran no trials")
+        return _not_applicable("the run's preconditions were unmet and it ran no trials", version)
     planned = _dig(evidence, "plan", "trial_count")
     trials_count = _dig(evidence, "trials", "count")
     results = _dig(evidence, "trials", "results")
     if not _int(planned) or planned < 0:
-        return _not_applicable("the plan records no trial count")
+        return _not_applicable("the plan records no trial count", version)
     if not _int(trials_count):
-        return _not_applicable("the evidence records no trials.count")
+        return _not_applicable("the evidence records no trials.count", version)
     if not isinstance(results, list):
-        return _not_applicable("the evidence records no trials.results list")
+        return _not_applicable("the evidence records no trials.results list", version)
     lock_plan = _dig(evidence, "lock", "plan")
     lock_plan = lock_plan if isinstance(lock_plan, dict) else None
     lock_count = _dig(lock_plan, "trial_count")
@@ -279,4 +314,5 @@ def from_request(integrity: dict) -> Outcome:
         lock_count=lock_count if _int(lock_count) else None,
         lock_speed=_speed(_dig(lock_plan, "command_speed")),
         has_lock=lock_plan is not None,
+        version=version,
     )

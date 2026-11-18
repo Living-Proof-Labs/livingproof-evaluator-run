@@ -1,4 +1,4 @@
-"""completeness 1.0.0 (livingproof-evaluator-run#3).
+"""completeness 1.1.0 (livingproof-evaluator-run#3, adopted at 1.1.0 in #18).
 
 Fail-first fixtures: one good evidence run, and one doctored missing-trial
 run. Results must be livingproof-evaluator-result/1.1.0 documents that pass
@@ -56,7 +56,7 @@ def test_good_fixture_completes_with_a_conforming_result(tmp_path: Path) -> None
     assert "conclusion" not in run
     check = result["integrity"]["checks"][0]
     assert check["id"] == "completeness"
-    assert check["version"] == "1.0.0"
+    assert check["version"] == "1.1.0"
     assert check["success"] is True
     assert check["findings"] == []
     assert _validate(result) == []

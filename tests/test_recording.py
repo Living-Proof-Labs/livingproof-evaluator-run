@@ -238,8 +238,14 @@ def test_no_declared_limit_means_not_applicable_even_with_media(tmp_path: Path) 
     check = _check(document)
     assert check["applicable"] is False
     assert check["findings"] == [] and "limits" not in check
-    text = document["descriptor"]["success_copy"]
+    # The truncated trial is completeness's, so the run has a finding and reads details_copy.
+    text = document["descriptor"]["details_copy"]
     assert "max_gap_seconds" in text and "no default" in text
+    assert [(i["trial_id"], i["reason"]) for i in check["not_checked"]] == [
+        ("trial-01", "not-present"),
+        ("trial-02", "not-recorded"),
+        ("trial-03", "not-recorded"),
+    ]
 
 
 def test_a_manifest_with_no_recording_declaration_at_all(tmp_path: Path) -> None:

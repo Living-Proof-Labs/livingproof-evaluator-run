@@ -1,14 +1,22 @@
-"""pins 1.0.0: the pins a run recorded match the pins its verification lock declares.
+"""pins 1.1.0: the pins a run recorded match the pins its verification lock declares.
 
-The contract (livingproof-evaluator ``schema/integrity/checks/pins.schema.json``) names five
-subjects: specs, runner, verifier, world and configuration. Each is compared once, from the
+The contract (livingproof-evaluator ``schema/integrity/checks/pins.schema.json``, v1.2.0) names
+five subjects: specs, runner, verifier, world and configuration. Each is compared once, from the
 evidence only. Nothing is resolved against GitHub, and nothing here says whether a pin is
 current.
 
-A subject is *not checked* when the lock declares nothing for it, or the run recorded no
-actual for it. It is never reported as matching, and it never fails the check. Today's
-``livingproof-hallway-evidence/2.0.0`` records no spec file digests and no verifier image
-digest, so ``specs`` and ``verifier`` are always not checked on that path.
+A subject is *checked* when the lock declares a value for it and the run recorded one. Any other
+subject is *not checked*: it is listed in ``not_checked``, with ``not-declared`` when the lock
+declares nothing for it (this is tested first, so a pin neither side carries is ``not-declared``)
+and ``not-recorded`` when the lock declares it and the run recorded no actual. It is never
+reported as matching, and it never fails the check. Today's ``livingproof-hallway-evidence/2.0.0``
+records no spec file digests and no verifier image digest, so ``specs`` and ``verifier`` are
+``not-recorded`` on that path when the lock declares them.
+
+``percentage`` is 100 times the checked subjects without a finding over the checked subjects. A
+subject that was not checked is outside the denominator, and with none checked the check is not
+applicable and lists all five. Version 1.0.0, which the contract keeps valid, divided by five and
+had no ``not_checked``; ``version="1.0.0"`` selects it.
 """
 
 from __future__ import annotations
@@ -20,7 +28,8 @@ from pathlib import Path
 from livingproof_evaluator_run.plain import shown
 
 PINS_ID = "pins"
-PINS_VERSION = "1.0.0"
+PINS_VERSION = "1.1.0"
+PREVIOUS_VERSIONS = ("1.0.0",)
 # The order of the contract's ``subject`` enum.
 SUBJECTS = ("specs", "runner", "verifier", "world", "configuration")
 RUN_MANIFEST = "run-manifest.json"
@@ -42,10 +51,16 @@ class Comparison:
     def differing(self) -> dict[str, str]:
         return {name: value for name, value in self.recorded.items() if value != self.declared}
 
+    @property
+    def reason(self) -> str:
+        """Why the subject was not checked. The lock is tested first."""
+        return "not-declared" if self.declared is None else "not-recorded"
+
 
 @dataclass
 class PinsOutcome:
     comparisons: list[Comparison]
+    version: str = PINS_VERSION
 
     @property
     def findings(self) -> list[dict]:
@@ -72,14 +87,28 @@ class PinsOutcome:
         return [c.subject for c in self.comparisons if c.checked and not c.differing]
 
     @property
-    def not_checked(self) -> list[str]:
+    def unchecked(self) -> list[str]:
         return [c.subject for c in self.comparisons if not c.checked]
 
     @property
+    def not_checked(self) -> list[dict] | None:
+        """The contract's ``not_checked`` items, in the order of its subject enum. None at 1.0.0,
+        which has no such field."""
+        if self.version == "1.0.0":
+            return None
+        return [
+            {"subject": c.subject, "reason": c.reason} for c in self.comparisons if not c.checked
+        ]
+
+    @property
     def percentage(self) -> float:
-        if not self.findings:
-            return 100
-        return 100 * len(self.matched) / len(SUBJECTS)
+        """100 times the matching checked subjects over the checked subjects (1.0.0: over five)."""
+        if self.version == "1.0.0":
+            if not self.findings:
+                return 100
+            return 100 * len(self.matched) / len(SUBJECTS)
+        checked = [c for c in self.comparisons if c.checked]
+        return 100 * (len(checked) - len(self.findings)) / len(checked)
 
 
 def _summary(item: Comparison) -> str:
@@ -107,7 +136,9 @@ def _empty() -> dict[str, Comparison]:
     return {subject: Comparison(subject) for subject in SUBJECTS}
 
 
-def from_evidence(manifest: dict, manifest_path: Path) -> PinsOutcome | None:
+def from_evidence(
+    manifest: dict, manifest_path: Path, version: str = PINS_VERSION
+) -> PinsOutcome | None:
     """Compare ``manifest.lock.content`` with what the manifest recorded.
 
     ``None`` when the manifest embeds no lock: there is nothing to compare against.
@@ -155,8 +186,15 @@ def from_evidence(manifest: dict, manifest_path: Path) -> PinsOutcome | None:
             pins["runner"].recorded[label] = value
 
     # specs and verifier: the lock declares file digests and an image digest, and the 2.0.0
-    # manifest records neither the bytes loaded nor the image run. Not checked.
-    return PinsOutcome([pins[subject] for subject in SUBJECTS])
+    # manifest records neither the bytes loaded nor the image run. They are declared and never
+    # recorded, so they are not checked, with the reason not-recorded. The value kept is only a
+    # mark that the lock declares one: nothing recorded is ever compared with it.
+    if isinstance(_dig(lock, "releases", "specs", "files"), dict) and _dig(
+        lock, "releases", "specs", "files"
+    ):
+        pins["specs"].declared = "the lock's specs file digests"
+    pins["verifier"].declared = _text(_dig(lock, "releases", "verifier", "digest"))
+    return PinsOutcome([pins[subject] for subject in SUBJECTS], version)
 
 
 def _run_manifest(manifest: dict, manifest_path: Path) -> dict | None:
@@ -175,7 +213,7 @@ def _run_manifest(manifest: dict, manifest_path: Path) -> dict | None:
     return document
 
 
-def from_request(integrity: dict) -> PinsOutcome | None:
+def from_request(integrity: dict, version: str = PINS_VERSION) -> PinsOutcome | None:
     """Compare ``manifest.pins`` with ``lock.pins`` on a livingproof-evaluator-request.
 
     ``None`` when neither side carries any pin.
@@ -192,4 +230,10 @@ def from_request(integrity: dict) -> PinsOutcome | None:
         value = _text(_dig(recorded, subject, "sha256"))
         if value is not None:
             pins[subject].recorded["manifest pins sha256"] = value
-    return PinsOutcome([pins[subject] for subject in SUBJECTS])
+    return PinsOutcome([pins[subject] for subject in SUBJECTS], version)
+
+
+def nothing_to_compare(version: str = PINS_VERSION) -> PinsOutcome:
+    """The outcome when there is no lock or neither side carries a pin: every subject is not
+    declared, so the check is not applicable and lists all five."""
+    return PinsOutcome(list(_empty().values()), version)

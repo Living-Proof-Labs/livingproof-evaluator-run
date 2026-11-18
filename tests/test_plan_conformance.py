@@ -245,12 +245,12 @@ def test_the_summary_says_whether_the_lock_was_compared(tmp_path: Path) -> None:
         "The plan, the trials and the lock agree on the trial count."
         in (document["descriptor"]["success_copy"])
     )
-    assert "Not checked: the plan against the lock" not in document["descriptor"]["success_copy"]
+    assert "lock trial count" not in document["descriptor"]["success_copy"]
     document, _ = _run_check(base.FIXTURES / "good", tmp_path / "without", None)
     copy_ = document["descriptor"]["success_copy"]
     assert "The plan and the trials agree on the trial count." in copy_
     assert "the lock agree" not in copy_
-    assert "Not checked: the plan against the lock." in copy_
+    assert "Not checked: lock trial count, lock command speed." in copy_
 
 
 def test_real_run_conforms(tmp_path: Path) -> None:
@@ -693,13 +693,15 @@ def test_the_comparisons_not_made_are_not_in_the_denominator(tmp_path: Path) -> 
 
 
 def test_the_descriptor_notes_come_from_not_checked(tmp_path: Path) -> None:
+    """One 'Not checked' sentence names every subject any check left out, so a note about the
+    lock does not push a sentence off the 400-character card."""
     both = _run_request(_request("no-lock"), tmp_path)["descriptor"]["success_copy"]
-    assert "Not checked: the plan against the lock." in both
+    assert "Not checked: lock trial count, lock command speed." in both
     request = _request("lock-checked")
     del request["integrity"]["evidence"][CHECK]["lock"]["plan"]["command_speed"]
     speed = _run_request(request, tmp_path)["descriptor"]["success_copy"]
-    assert "Not checked: the command speed against the lock." in speed
-    assert "plan against the lock" not in speed
+    assert "Not checked: lock command speed." in speed
+    assert "lock trial count" not in speed
 
 
 def test_a_request_without_plan_conformance_evidence_is_not_applicable(tmp_path: Path) -> None:

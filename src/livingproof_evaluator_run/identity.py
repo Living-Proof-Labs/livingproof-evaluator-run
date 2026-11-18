@@ -1,4 +1,4 @@
-"""Publisher identity from the livingproof-evaluator v1.1.0 contract examples."""
+"""Publisher identity from the livingproof-evaluator contract examples (v1.2.0)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ DISPLAY_NAME = "Run Integrity"
 PUBLISHER = "Living Proof Labs"
 KIND = "integrity"
 EXECUTION = "deterministic"
-CHECK_ID = "completeness"
-CHECK_VERSION = "1.0.0"
 RESULT_FORMAT = "livingproof-evaluator-result/1.1.0"
 # Subset-legal mark from livingproof-evaluator examples/descriptor/integrity-with-icon.
 ICON = (

@@ -562,8 +562,17 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
 
 def _as_1_1_0(check: dict) -> dict:
     """The contract keeps its 1.0.0 examples as published. A 1.0.0 termination check read as
-    1.1.0 changes only its version, when no plan lists simulation-broken."""
-    return {**check, "version": "1.1.0"} if check["version"] == "1.0.0" else check
+    1.1.0 changes its version, and the summary of a simulation-broken finding, which is now
+    "never allowed" even when the plan does not list it."""
+    if check["version"] != "1.0.0":
+        return check
+    findings = [
+        {**f, "summary": "The stop reason simulation-broken is never allowed."}
+        if f["category"] == "disallowed-stop-reason" and "simulation-broken" in f["summary"]
+        else f
+        for f in check["findings"]
+    ]
+    return {**check, "version": "1.1.0", "findings": findings}
 
 
 @pytest.mark.parametrize(

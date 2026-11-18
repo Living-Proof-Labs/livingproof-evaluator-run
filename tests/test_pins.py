@@ -155,7 +155,7 @@ def test_doctored_value_is_one_hash_mismatch_on_its_subject(
     # Two of the three checked subjects still match. The two not checked are outside the
     # denominator (1.0.0 divided by five and read 40).
     assert pins["percentage"] == pytest.approx(100 * 2 / 3)
-    assert document["integrity"]["run"]["percentage"] == 40
+    assert document["integrity"]["run"]["percentage"] == pytest.approx(100 * 2 / 3)
     _conforming_error(document)
     # The completeness check is untouched.
     assert _check(document, "completeness")["success"] is True
@@ -236,7 +236,7 @@ def test_unrecorded_configuration_and_runner_are_not_checked(tmp_path: Path) -> 
     pins = _check(document, "pins")
     assert pins["findings"] == []
     copy = document["descriptor"]["success_copy"]
-    assert "Not checked: specs, runner, verifier, configuration." in copy
+    assert "Not checked: specs, runner, verifier, configuration" in copy
     assert {i["subject"]: i["reason"] for i in pins["not_checked"]} == {
         "specs": "not-recorded",
         "runner": "not-recorded",
