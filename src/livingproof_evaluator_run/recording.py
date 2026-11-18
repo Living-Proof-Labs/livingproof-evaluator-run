@@ -369,7 +369,7 @@ def from_evidence(
     if channels is None:
         why = "the plan declares none" if declared is None else "the plan's list is not usable"
         channels = list(DEFAULT_REQUIRED_CHANNELS)
-        notes.append(f"Required channels: the default {', '.join(channels)} ({why}).")
+        notes.append(f"Recording: required channels are the default {', '.join(channels)} ({why}).")
     by_index: dict[int, dict] = {}
     for entry in listed:
         index = entry.get("index") if isinstance(entry, dict) else None
