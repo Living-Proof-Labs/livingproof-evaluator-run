@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -120,18 +121,18 @@ def evaluate(source: Path, out: Path) -> int:
 def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     payload = request.get("integrity") if isinstance(request.get("integrity"), dict) else {}
     manifest = payload.get("manifest") if isinstance(payload.get("manifest"), dict) else {}
-    planned = [
-        item["id"]
-        for item in manifest.get("planned_trials") or []
-        if isinstance(item, dict) and item.get("id")
-    ]
+    raw_planned = manifest.get("planned_trials") or []
+    if not raw_planned or any(
+        not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]
+        for item in raw_planned
+    ):
+        return 2
+    planned = [item["id"] for item in raw_planned]
     evidence = {
         item["id"]: item
         for item in payload.get("trials") or []
         if isinstance(item, dict) and item.get("id")
     }
-    if not planned:
-        return 2
     findings: list[dict] = []
     trials: list[dict] = []
     complete = 0
@@ -177,6 +178,20 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     reports.append(_pins(pins.from_request(payload)))
     reports.append(_plan_conformance(plan_conformance.from_request(payload)))
     reports.append(_termination(termination.from_request(payload)))
+    # Overflow counts every descriptor finding, including pins, plan-conformance
+    # and termination, so a non-plain trial id at the 50th completeness slot can
+    # be dropped from the descriptor.
+    shown_items = [item for report in reports for item in report.shown]
+    visible = shown_items[: MAX_FINDINGS - 1] if len(shown_items) > MAX_FINDINGS else shown_items
+    in_descriptor = [item["trial"] for item in visible if "trial" in item]
+    if any(not is_plain(plain(tid)) for tid in planned) and not any(
+        not is_plain(plain(tid)) for tid in in_descriptor
+    ):
+        print(
+            "livingproof-evaluator-run: planned trial id is not plain text; no result written",
+            file=sys.stderr,
+        )
+        return 1
     return _write_result(
         out,
         run_id=str(manifest.get("id") or "run"),
@@ -346,8 +361,20 @@ def _termination(outcome: termination.Outcome) -> Report:
     return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
 
 
+_ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})")
+
+
 def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"
+    if len(text) <= limit:
+        return text
+    cut = max(0, limit - 1)
+    for match in _ESCAPE.finditer(text):
+        if match.start() >= cut:
+            break
+        if match.end() > cut:
+            cut = match.start()
+            break
+    return text[:cut].rstrip() + "\u2026"
 
 
 def _write_result(
@@ -384,9 +411,9 @@ def _write_result(
     notes = " ".join(note for report in reports for note in report.notes)
     # Text copied out of evidence is escaped, so the descriptor matches the contract's
     # plain-text pattern whatever the evidence holds.
-    # They are also cut to the contract's lengths. The check's own findings keep the full
-    # trial id; only the descriptor's short form is clipped.
-    shown = [
+    # They are also cut to the contract's lengths on whole escape boundaries. The check's
+    # own findings keep the full trial id; only the descriptor's short form is clipped.
+    all_shown = [
         {
             key: _clip(plain(value), FINDING_LIMITS.get(key, 280))
             if isinstance(value, str)
@@ -395,17 +422,28 @@ def _write_result(
         }
         for report in reports
         for item in report.shown
-    ][:MAX_FINDINGS]
+    ]
+    overflow_note = ""
+    if len(all_shown) > MAX_FINDINGS:
+        keep = MAX_FINDINGS - 1
+        dropped = len(all_shown) - keep
+        noun = "finding" if dropped == 1 else "findings"
+        overflow_note = f"And {dropped} more {noun} (showing {keep} of {len(all_shown)})."
+        shown = [*all_shown[:keep], {"text": overflow_note}]
+    else:
+        shown = all_shown
     if success:
         parts = [report.success_copy for report in reports if report.success_copy] + (
             [notes] if notes else []
         )
         descriptor["success_copy"] = _clip(" ".join(parts), 400)
     else:
-        problems = " ".join(item["text"] for item in shown)
-        room = 1000 - (len(notes) + 1 if notes else 0)
+        kept = all_shown[: MAX_FINDINGS - 1] if overflow_note else shown
+        problems = " ".join(item["text"] for item in kept)
+        tail = " ".join(part for part in (overflow_note, notes) if part)
+        room = max(0, DESCRIPTOR_LIMITS["details_copy"] - (len(tail) + 1 if tail else 0))
         text = _clip(problems, room)
-        descriptor["details_copy"] = f"{text} {notes}" if notes else text
+        descriptor["details_copy"] = f"{text} {tail}" if text and tail else (tail or text)
         descriptor["findings"] = shown
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     document = {

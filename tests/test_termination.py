@@ -11,8 +11,8 @@ writes it:
 * the trial's stop reason is the ``end`` in its observation file (``trials/trial-NN.json``);
 * the manifest copies it as ``trials.results[].outcome``;
 * the runner's words map to the contract's: ``crossed_exit`` is ``mission-done``,
-  ``left_hallway`` is ``left-world``, ``time_limit`` is ``time-limit``, ``non_finite_state`` is
-  ``simulation-broken``;
+  ``left_hallway`` and ``left_world`` are ``left-world``, ``time_limit`` is ``time-limit``,
+  ``non_finite_state`` is ``simulation-broken``;
 * the plan's allowed list is ``plan.allowed_stop_reasons`` in the manifest, else the lock's plan,
   else a default that leaves out ``simulation-broken``.
 
@@ -168,6 +168,7 @@ def test_checks_are_reported_in_order(tmp_path: Path) -> None:
     [
         ("crossed_exit", "mission-done"),
         ("left_hallway", "left-world"),
+        ("left_world", "left-world"),
         ("time_limit", "time-limit"),
         ("adapter_done", "adapter-or-scenario-done"),
     ],
