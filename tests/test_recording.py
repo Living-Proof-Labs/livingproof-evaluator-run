@@ -160,7 +160,8 @@ def test_no_media_is_not_applicable(tmp_path: Path) -> None:
         "findings": [],
     }
     assert document["integrity"]["run"]["percentage"] == 100
-    assert "Not checked: recording" in document["descriptor"]["success_copy"]
+    # No media directory at all is not a finding about the run, so the card carries no note.
+    assert "Not checked: recording" not in document["descriptor"]["success_copy"]
     assert base._validate(document) == []
 
 
