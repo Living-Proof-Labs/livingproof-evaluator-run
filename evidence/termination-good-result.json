@@ -1,0 +1,111 @@
+{
+  "format": "livingproof-evaluator-result/1.1.0",
+  "evaluator": {
+    "id": "livingproof-run-integrity",
+    "version": "1.1.2-dev.7",
+    "kind": "integrity",
+    "execution": "deterministic",
+    "display_name": "Run Integrity",
+    "publisher": "Living Proof Labs",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+  },
+  "inputs": [
+    {
+      "role": "manifest",
+      "uri": "manifest.json",
+      "sha256": "a1ef3196c40f56758445ae85c57f3692ffb6f1eb3b04487b039946e1752c4e0d"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-01.json",
+      "sha256": "671535f68a40a8822acd8972094e74410b3077bbade59564666d0010ad4774f9"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-02.json",
+      "sha256": "531eb10ebb43c9dce1dc1129f73d7c8432a0ab134b2a8baddaa23267a16c26e4"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-03.json",
+      "sha256": "345aad90c520d17a9f05bbf65ba4b0fab046128457955534f7f1adea4529bee4"
+    }
+  ],
+  "timestamps": {
+    "started_at": "2026-11-18T08:46:13Z",
+    "completed_at": "2026-11-18T08:46:13Z"
+  },
+  "integrity": {
+    "run": {
+      "id": "run-1",
+      "test_system_status": "COMPLETED",
+      "success": true,
+      "percentage": 100.0
+    },
+    "trials": [
+      {
+        "id": "trial-01",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      },
+      {
+        "id": "trial-02",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      },
+      {
+        "id": "trial-03",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      }
+    ],
+    "checks": [
+      {
+        "id": "completeness",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": true,
+        "percentage": 100.0,
+        "findings": []
+      },
+      {
+        "id": "pins",
+        "version": "1.0.0",
+        "applicable": false,
+        "success": true,
+        "findings": []
+      },
+      {
+        "id": "plan-conformance",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": true,
+        "percentage": 100.0,
+        "findings": []
+      },
+      {
+        "id": "termination",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": true,
+        "percentage": 100.0,
+        "findings": [],
+        "referrals": []
+      }
+    ]
+  },
+  "descriptor": {
+    "title": "Run Integrity",
+    "purpose": "Judges whether the run and the test system can be trusted.",
+    "version": "1.1.2-dev.7",
+    "kind": "Test system",
+    "source": "Living Proof Labs",
+    "tier": "test_system_status",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
+    "icon_accessible_name": "Run Integrity",
+    "success_copy": "Every planned trial has its observation file. The plan and the trials agree on the trial count. Every trial that ended on its own stopped for a reason the plan allows. Not checked: the plan against the lock. Stop reasons: the default allowed list, which excludes simulation-broken (the plan declares none)."
+  }
+}
