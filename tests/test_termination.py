@@ -381,7 +381,7 @@ def test_one_trial_can_be_unknown_and_mismatched_and_counts_once(tmp_path: Path)
 def test_an_end_that_is_not_text_is_not_a_clean_ending(bad: object, tmp_path: Path) -> None:
     document, check = _doctored(tmp_path, lambda f: _set_end(f, 1, bad, outcome=None))
     assert check["success"] is False
-    assert _categories(check) in (["unknown-stop-reason"], ["missing-stop-reason"])
+    assert _categories(check) == (["missing-stop-reason"] if bad == "" else ["unknown-stop-reason"])
     _conforming_error(document)
 
 
@@ -546,8 +546,8 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
 def test_the_contract_examples_give_the_contract_checks(name: str, tmp_path: Path) -> None:
     document = _run_request(_request(name), tmp_path)
     expected = json.loads((EXAMPLES / name / "result.json").read_text(encoding="utf-8"))
-    for check_id in (CHECK, "completeness"):
-        assert _check(document, check_id) == _check(expected, check_id)
+    for check in _checks(expected):
+        assert _check(document, check["id"]) == check
     assert document["integrity"]["trials"] == expected["integrity"]["trials"]
     assert base._validate(document) == []
 
@@ -579,8 +579,9 @@ def test_a_timeout_and_a_crash_are_reported_once_by_completeness(tmp_path: Path)
 def test_referrals_change_neither_success_nor_percentage(tmp_path: Path) -> None:
     """The same request with and without the two endings: termination reads the same."""
     plain = _request("timeout-single-report")
-    for trial in plain["integrity"]["trials"]:
-        trial["termination"] = "completed"
+    plain["integrity"]["trials"] = [
+        trial for trial in plain["integrity"]["trials"] if trial["termination"] == "completed"
+    ]
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     with_referrals = _run_request(_request("timeout-single-report"), tmp_path / "a")
@@ -591,7 +592,8 @@ def test_referrals_change_neither_success_nor_percentage(tmp_path: Path) -> None
         two["percentage"],
         two["findings"],
     )
-    assert one["referrals"] and two["referrals"] == []
+    assert len(one["referrals"]) == 2
+    assert two["referrals"] == []
 
 
 def test_a_timeout_with_a_bad_stop_reason_still_has_one_finding(tmp_path: Path) -> None:
