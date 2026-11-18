@@ -109,6 +109,21 @@ def test_an_lz4_bomb_is_refused_fast_and_small(tmp_path: Path) -> None:
     _refused(_probe(bombs.write(tmp_path / "bomb.mcap", data)))
 
 
+def test_a_decompression_bomb_stops_at_the_per_chunk_cap(tmp_path: Path) -> None:
+    """One chunk well over 32 MiB, with a total far below 2 GiB, stops at the per-chunk cap.
+
+    128 MiB is four times the per-chunk cap and one sixteenth of 2 GiB, so a stop here
+    cannot be the total cap. The file is a few tens of kilobytes; an unguarded read would
+    hold the decompressed chunk.
+    """
+    size = 128 << 20
+    data = bombs.mcap_with_chunk(bombs.zeros_zstd(size), declared=size)
+    result = _probe(bombs.write(tmp_path / "bomb.mcap", data))
+    _refused(result)
+    assert "per chunk" in result["reason"]
+    assert "in total" not in result["reason"]
+
+
 def test_a_chunk_of_millions_of_tiny_records_is_refused_fast(tmp_path: Path) -> None:
     """Under the byte limits (24 MiB, honestly declared) but 2.8 million records: the parse, not
     the memory, is what would take the time."""
