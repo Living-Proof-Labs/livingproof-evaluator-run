@@ -8,7 +8,7 @@ clear ``mcap-incomplete`` finding instead of crashing or running out of memory.
 The bombs are crafted per test (``tests/bombs.py``): a few tens of kilobytes that would expand to
 512 MiB. Each is read in a fresh interpreter that reports its own elapsed time and peak RSS, so
 the assertions are about bounded time and memory, not just about the finding. Peak RSS is
-``ru_maxrss``; an unguarded read of these files needs well over 1 GB.
+``VmHWM``; an unguarded read of these files needs well over 1 GB.
 """
 
 from __future__ import annotations
@@ -34,18 +34,25 @@ RSS_KB = 256 * 1024  # an unguarded read of the same file needs more than 1 GB
 
 _PROBE = textwrap.dedent(
     """
-    import json, resource, sys, time
+    import json, sys, time
     from pathlib import Path
     from livingproof_evaluator_run import mcap_reader
+    def peak_rss_kb():
+        # VmHWM is this interpreter's own peak; ru_maxrss would also count the parent's memory
+        # at fork, which here holds the bomb it just built.
+        for line in open("/proc/self/status"):
+            if line.startswith("VmHWM:"):
+                return int(line.split()[1])
+
     started = time.monotonic()
     inspection = mcap_reader.inspect(Path(sys.argv[1]))
     elapsed = time.monotonic() - started
     print(json.dumps({
         "elapsed": elapsed,
-        "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "rss_kb": peak_rss_kb(),
         "complete": inspection.complete,
         "reason": inspection.reason,
-        "limit_exceeded": getattr(inspection, "limit_exceeded", None),
+        "cap_exceeded": getattr(inspection, "cap_exceeded", None),
         "channels": len(inspection.channels),
     }))
     """
@@ -67,7 +74,7 @@ def _refused(result: dict) -> None:
     assert result["elapsed"] < SECONDS, f"took {result['elapsed']:.1f} s"
     assert result["rss_kb"] < RSS_KB, f"peaked at {result['rss_kb'] // 1024} MB"
     assert result["complete"] is False
-    assert result["limit_exceeded"] is True
+    assert result["cap_exceeded"] is True
     assert "limit" in result["reason"]
     assert result["channels"] == 0
 
@@ -104,9 +111,9 @@ def test_an_lz4_bomb_is_refused_fast_and_small(tmp_path: Path) -> None:
 
 def test_messages_raises_a_read_limit_error_for_a_bomb(tmp_path: Path) -> None:
     path = bombs.write(tmp_path / "bomb.mcap", bombs.mcap_with_chunk(bombs.zeros_zstd(1 << 28)))
-    with pytest.raises(mcap_reader.ReadLimitError, match="limit"):
+    with pytest.raises(mcap_reader.ReadCapError, match="limit"):
         list(mcap_reader.messages(path))
-    assert issubclass(mcap_reader.ReadLimitError, mcap_reader.ReadError)
+    assert issubclass(mcap_reader.ReadCapError, mcap_reader.ReadError)
 
 
 # The limits themselves, lowered so a normal recording can cross each one quickly.
@@ -117,18 +124,18 @@ def _recording(tmp_path: Path, count: int = 100) -> Path:
 
 
 def test_the_defaults_are_the_documented_values() -> None:
-    limits = mcap_reader.DEFAULT_LIMITS
-    assert limits == mcap_reader.Limits(
-        max_chunk_bytes=64 << 20,
+    limits = mcap_reader.STANDARD_CAPS
+    assert limits == mcap_reader.Caps(
+        max_chunk_bytes=32 << 20,
         max_total_bytes=256 << 20,
-        max_messages=2_000_000,
+        max_records=2_000_000,
         max_chunks=100_000,
     )
 
 
 def test_a_normal_recording_is_complete_under_the_defaults(tmp_path: Path) -> None:
     inspection = mcap_reader.inspect(_recording(tmp_path))
-    assert inspection.complete and inspection.limit_exceeded is False
+    assert inspection.complete and inspection.cap_exceeded is False
     assert [c.message_count for c in inspection.channels] == [100, 100]
 
 
@@ -142,37 +149,56 @@ def test_the_real_recording_is_complete_under_the_defaults() -> None:
     [
         ({"max_chunk_bytes": 1024}, "per chunk"),
         ({"max_total_bytes": 4096}, "in total"),
-        ({"max_messages": 150}, "messages"),
+        ({"max_records": 150}, "records"),
         ({"max_chunks": 3}, "chunks"),
     ],
 )
 def test_each_limit_refuses_a_recording_that_crosses_it(
     tmp_path: Path, limits: dict, name: str
 ) -> None:
-    inspection = mcap_reader.inspect(_recording(tmp_path), mcap_reader.Limits(**limits))
+    inspection = mcap_reader.inspect(_recording(tmp_path), mcap_reader.Caps(**limits))
     assert not inspection.complete
-    assert inspection.limit_exceeded is True
+    assert inspection.cap_exceeded is True
     assert name in inspection.reason
     assert inspection.channels == ()
 
 
+def _records_in_chunks(path: Path) -> int:
+    """Every record inside the file's chunks, counted with the ``mcap`` package itself."""
+    from mcap.reader import make_reader
+    from mcap.stream_reader import breakup_chunk
+
+    with path.open("rb") as stream:
+        reader = make_reader(stream)
+        total = 0
+        for index in reader.get_summary().chunk_indexes:
+            stream.seek(index.chunk_start_offset + 9)
+            from mcap.data_stream import ReadDataStream
+            from mcap.records import Chunk
+
+            total += len(list(breakup_chunk(Chunk.read(ReadDataStream(stream)))))
+        return total
+
+
 def test_a_recording_exactly_at_a_limit_is_read(tmp_path: Path) -> None:
     path = _recording(tmp_path)
-    assert mcap_reader.inspect(path, mcap_reader.Limits(max_messages=200)).complete
-    assert not mcap_reader.inspect(path, mcap_reader.Limits(max_messages=199)).complete
+    exact = _records_in_chunks(path)
+    assert exact >= 200  # the messages, plus the channel and schema records
+    assert mcap_reader.inspect(path, mcap_reader.Caps(max_records=exact)).complete
+    assert not mcap_reader.inspect(path, mcap_reader.Caps(max_records=exact - 1)).complete
 
 
 def test_a_truncated_file_is_incomplete_but_not_a_limit_breach(tmp_path: Path) -> None:
     path = _recording(tmp_path)
     rec.truncate(path)
     inspection = mcap_reader.inspect(path)
-    assert not inspection.complete and inspection.limit_exceeded is False
+    assert not inspection.complete and inspection.cap_exceeded is False
 
 
 @pytest.mark.parametrize("bad", [0, -1, 1.5, True, "64"])
 def test_a_limit_must_be_a_positive_integer(bad: object) -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        mcap_reader.Limits(max_messages=bad)  # type: ignore[arg-type]
+        mcap_reader.Caps(max_records=bad)  # type: ignore[arg-type]
 
 
 # The finding, end to end through a run.
@@ -195,7 +221,7 @@ def test_a_bomb_in_a_run_is_one_clear_mcap_incomplete_finding(tmp_path: Path) ->
 
 
 def test_the_limit_summary_is_short_enough_for_a_card() -> None:
-    summary = base.module().LIMIT_SUMMARY
+    summary = base.module().CAP_SUMMARY
     assert len(summary) <= 160
 
 
@@ -204,7 +230,7 @@ def test_the_limit_summary_is_short_enough_for_a_card() -> None:
 
 def test_the_docs_state_every_default() -> None:
     text = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
-    for needle in ("64 MiB", "256 MiB", "2,000,000", "100,000"):
+    for needle in ("32 MiB", "256 MiB", "2,000,000", "100,000"):
         assert needle in text, needle
     assert "decompress" in text and "fail" in text.lower()
 
