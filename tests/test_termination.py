@@ -190,6 +190,7 @@ def test_the_runner_words_map_to_the_contract_vocabulary() -> None:
     assert termination.END_TO_STOP_REASON == {
         "crossed_exit": "mission-done",
         "left_hallway": "left-world",
+        "left_world": "left-world",
         "time_limit": "time-limit",
         "non_finite_state": "simulation-broken",
         "adapter_done": "adapter-or-scenario-done",
@@ -701,9 +702,7 @@ def test_left_world_from_a_route_observation_maps_to_the_contracts_left_world(
     That is the contract's left-world, which the default allows. An unmapped
     left_world would be reported as unknown-stop-reason, even on a clean leave.
     """
-    document, check = _doctored(
-        tmp_path, lambda folder: _set_end(folder, 1, "left_world"), REAL
-    )
+    document, check = _doctored(tmp_path, lambda folder: _set_end(folder, 1, "left_world"), REAL)
     assert check["success"] is True
     assert check["findings"] == []
     from livingproof_evaluator_run import termination

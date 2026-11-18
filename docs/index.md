@@ -105,7 +105,7 @@ version.
 | the plan's allowed list | `plan.allowed_stop_reasons` in the manifest, else the same key in the embedded lock's plan, else the default |
 
 The runner's words map to the contract's stop reasons: `crossed_exit` is `mission-done`,
-`left_hallway` is `left-world`, `time_limit` is `time-limit`, `non_finite_state` is
+`left_hallway` and `left_world` are `left-world`, `time_limit` is `time-limit`, `non_finite_state` is
 `simulation-broken`, and `adapter_done` is `adapter-or-scenario-done` (the word the contract's
 own examples use; no runner writes it today). A word with no mapping is kept as written and is
 reported as `unknown-stop-reason`.

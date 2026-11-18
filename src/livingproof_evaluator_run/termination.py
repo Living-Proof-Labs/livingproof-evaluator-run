@@ -18,7 +18,7 @@ writes it):
 * the trial's stop reason is ``end`` in its observation file, ``trials/trial-NN.json``;
 * the manifest copies it as ``trials.results[].outcome``, the other record it must agree with;
 * the runner's words map to the contract's (``END_TO_STOP_REASON``): ``crossed_exit`` is
-  ``mission-done``, ``left_hallway`` is ``left-world``, ``time_limit`` is ``time-limit`` and
+  ``mission-done``, ``left_hallway`` (hallway) and ``left_world`` (route) are ``left-world``, ``time_limit`` is ``time-limit`` and
   ``non_finite_state`` is ``simulation-broken``. A word that is not in the table is kept as
   written, so it is reported as unknown rather than passed;
 * the plan's allowed list is ``plan.allowed_stop_reasons`` in the manifest, else the same key in
@@ -72,6 +72,7 @@ CATEGORIES = (
 END_TO_STOP_REASON = {
     "crossed_exit": "mission-done",
     "left_hallway": "left-world",
+    "left_world": "left-world",
     "time_limit": "time-limit",
     "non_finite_state": "simulation-broken",
     "adapter_done": "adapter-or-scenario-done",
