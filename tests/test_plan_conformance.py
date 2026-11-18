@@ -117,6 +117,11 @@ def _wrong_path(doc: dict) -> None:
     doc["trials"]["results"][2]["path"] = "trials/trial-02.json"
 
 
+def _noncanonical_path(doc: dict) -> None:
+    """The right file under a name that is not trials/trial-NN.json: only this check objects."""
+    doc["trials"]["results"][2]["path"] = "./trials/trial-03.json"
+
+
 def _extra_trial(doc: dict) -> None:
     extra = copy.deepcopy(doc["trials"]["results"][2])
     extra["index"] = 4
@@ -346,7 +351,8 @@ def test_a_hash_mismatch_is_not_repeated(tmp_path: Path) -> None:
 
 
 def test_plan_conformance_findings_do_not_touch_trial_statuses(tmp_path: Path) -> None:
-    document, _ = _run_check(GOOD, tmp_path, _wrong_path)
+    document, check = _run_check(GOOD, tmp_path, _noncanonical_path)
+    assert _categories(check) == ["path-mismatch"]
     assert [t["test_system_status"] for t in document["integrity"]["trials"]] == ["COMPLETED"] * 3
     assert document["integrity"]["run"]["test_system_status"] == "ERROR"
 
@@ -484,6 +490,48 @@ def test_command_speed_is_compared_only_when_both_sides_record_one(tmp_path: Pat
         assert check["percentage"] == 100
 
 
+@pytest.mark.parametrize("bad", [True, 0, -1, "0.5", [0.5]])
+def test_a_command_speed_that_is_not_a_positive_number_is_a_mismatch(
+    bad: object, tmp_path: Path
+) -> None:
+    """Both sides record one, so they are compared; a boolean, zero or text is not a speed."""
+
+    def broken(doc: dict) -> None:
+        doc["plan"]["command_speed"] = bad
+
+    document, check = _run_check(GOOD, tmp_path, broken)
+    assert _categories(check) == ["command-speed-mismatch"]
+    _conforming_error(document)
+
+
+def test_a_boolean_is_not_equal_to_the_speed_one(tmp_path: Path) -> None:
+    def one(doc: dict) -> None:
+        doc["plan"]["command_speed"] = True
+        doc["lock"]["content"]["plan"]["command_speed"] = 1
+
+    _, check = _run_check(GOOD, tmp_path, one)
+    assert _categories(check) == ["command-speed-mismatch"]
+
+
+def test_a_null_command_speed_is_no_speed(tmp_path: Path) -> None:
+    def null(doc: dict) -> None:
+        doc["plan"]["command_speed"] = None
+
+    _, check = _run_check(GOOD, tmp_path, null)
+    assert check["success"] is True
+    assert check["percentage"] == 100
+
+
+@pytest.mark.parametrize("entry", [{"name": "scenario_supported"}, {"met": None}, {"met": 0}])
+def test_only_an_explicit_false_precondition_stops_the_run(entry: dict, tmp_path: Path) -> None:
+    def odd(doc: dict) -> None:
+        doc["preconditions"] = [entry]
+
+    _, check = _run_check(GOOD, tmp_path, odd)
+    assert check["applicable"] is True
+    assert check["success"] is True
+
+
 def test_integer_and_float_speeds_compare_by_value(tmp_path: Path) -> None:
     def same(doc: dict) -> None:
         doc["plan"]["command_speed"] = 1
@@ -506,11 +554,11 @@ def test_text_copied_from_evidence_is_shown_escaped(tmp_path: Path) -> None:
 
 
 def test_descriptor_findings_name_no_trial(tmp_path: Path) -> None:
-    document, _ = _run_check(GOOD, tmp_path, _wrong_path)
+    document, _ = _run_check(GOOD, tmp_path, _noncanonical_path)
     (item,) = document["descriptor"]["findings"]
     assert "trial" not in item
     assert item["severity"] == "Needs attention"
-    assert "trials/trial-03.json" in item["text"]
+    assert "./trials/trial-03.json" in item["text"]
 
 
 def test_a_large_plan_keeps_every_finding_and_a_valid_descriptor(tmp_path: Path) -> None:

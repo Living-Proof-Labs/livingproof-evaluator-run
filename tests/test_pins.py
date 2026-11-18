@@ -82,7 +82,11 @@ def test_good_run_matches_its_lock_and_lists_what_was_not_checked(tmp_path: Path
 
 def test_completeness_is_still_reported_first(tmp_path: Path) -> None:
     document = _run(GOOD, tmp_path)
-    assert [c["id"] for c in document["integrity"]["checks"]] == ["completeness", "pins"]
+    assert [c["id"] for c in document["integrity"]["checks"]] == [
+        "completeness",
+        "pins",
+        "plan-conformance",
+    ]
 
 
 def _world(doc: dict) -> None:

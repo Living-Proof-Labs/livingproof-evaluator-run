@@ -9,7 +9,7 @@
         "trials": {
           "count": 4
         },
-        "command_speed": 1.0
+        "command_speed": 2.0
       }
     }
   },
@@ -17,7 +17,7 @@
     "trials": {
       "count": 5
     },
-    "command_speed": 0.5
+    "command_speed": 1.0
   },
   "preconditions": [
     {
