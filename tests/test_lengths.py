@@ -170,8 +170,10 @@ def test_past_the_cap_adds_an_and_n_more_note(tmp_path: Path, count: int) -> Non
     dropped = count - (MAX_FINDINGS - 1)
     expected_note = f"And {dropped} more findings (showing {MAX_FINDINGS - 1} of {count})."
     assert shown[-1] == {"text": expected_note}
-    assert document["descriptor"]["details_copy"].endswith(expected_note)
-    assert len(document["descriptor"]["details_copy"]) <= 1000
+    # The overflow note is followed by any "Not checked" notes from other checks.
+    details = document["descriptor"]["details_copy"]
+    assert expected_note in details
+    assert len(details) <= 1000
     assert base._validate(document) == []
 
 
@@ -297,3 +299,49 @@ def test_blank_id_exactly_at_the_cap_is_caught_by_the_descriptor_guard(
     assert not out.exists()
     err = capsys.readouterr().err
     assert "not plain text" in err and "findings[44].trial" in err
+
+
+def test_blank_trial_id_is_caught_when_plan_conformance_findings_overflow_the_cap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A clean request has no pin findings, so 50 completeness findings (blank last) sit
+    # exactly on the cap. Plan-conformance findings then overflow it and would drop the
+    # blank from the descriptor if the fail-closed check did not count them.
+    request = json.loads((EXAMPLES / "clean" / "request.json").read_text())
+    ids = [f"trial-{index:03d}" for index in range(MAX_FINDINGS - 1)] + ["   "]
+    request["integrity"]["manifest"]["planned_trials"] = [{"id": item} for item in ids]
+    findings = json.loads((EXAMPLES / "plan-conformance" / "findings" / "request.json").read_text())
+    request["integrity"].setdefault("evidence", {}).update(findings["integrity"]["evidence"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "planned trial id is not plain text" in err
+    assert "findings[" not in err
+
+
+def test_blank_trial_id_is_caught_when_termination_findings_overflow_the_cap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 50 missing trials, last one blank, plus one complete trial with a disallowed stop
+    # reason: the termination finding overflows the cap and would drop the blank.
+    request = json.loads((EXAMPLES / "clean" / "request.json").read_text())
+    ids = [f"trial-{index:03d}" for index in range(MAX_FINDINGS - 1)] + ["   "]
+    complete = dict(request["integrity"]["trials"][0], id="complete-01", termination="completed")
+    request["integrity"]["manifest"]["planned_trials"] = [
+        {"id": item} for item in ids + ["complete-01"]
+    ]
+    request["integrity"]["trials"] = [complete]
+    request["integrity"].setdefault("evidence", {})["termination"] = {
+        "trials": [{"id": "complete-01", "stop_reason": "non_finite_state"}]
+    }
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(request), encoding="utf-8")
+    out = tmp_path / "result.json"
+    assert main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "planned trial id is not plain text" in err
+    assert "findings[" not in err

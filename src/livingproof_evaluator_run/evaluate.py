@@ -359,6 +359,8 @@ def _termination(outcome: termination.Outcome) -> Report:
     if outcome.applicable and not outcome.findings:
         success = "Every trial that ended on its own stopped for a reason the plan allows."
     return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
+
+
 _ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})")
 
 
