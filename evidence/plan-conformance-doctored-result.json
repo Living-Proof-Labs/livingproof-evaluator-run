@@ -1,0 +1,124 @@
+{
+  "format": "livingproof-evaluator-result/1.1.0",
+  "evaluator": {
+    "id": "livingproof-run-integrity",
+    "version": "1.1.1",
+    "kind": "integrity",
+    "execution": "deterministic",
+    "display_name": "Run Integrity",
+    "publisher": "Living Proof Labs",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+  },
+  "inputs": [
+    {
+      "role": "manifest",
+      "uri": "manifest.json",
+      "sha256": "e87d4cd8ed8b2e7bc4b4388b3ed0d816d5dfc87923dbe28d7d70ac50c4fb30f4"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-01.json",
+      "sha256": "6259fc44635a34baae181e3ecebe841cd48c2bfbb76aef89ba0285cfcea4f8ef"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-02.json",
+      "sha256": "413d428cef5daecba9ee7f4438728b0dc46a7ca62402e62f79f7e14b60350675"
+    },
+    {
+      "role": "observations",
+      "uri": "trials/trial-03.json",
+      "sha256": "623575b25df0cef3f74c281565f4813c1f369be915ce3bc34f576362a8539170"
+    }
+  ],
+  "timestamps": {
+    "started_at": "2026-11-18T08:34:45Z",
+    "completed_at": "2026-11-18T08:34:45Z"
+  },
+  "integrity": {
+    "run": {
+      "id": "run-1",
+      "test_system_status": "ERROR",
+      "success": false,
+      "percentage": 71.42857142857143,
+      "conclusion": "INCONCLUSIVE"
+    },
+    "trials": [
+      {
+        "id": "trial-01",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      },
+      {
+        "id": "trial-02",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      },
+      {
+        "id": "trial-03",
+        "test_system_status": "COMPLETED",
+        "success": true,
+        "percentage": 100
+      }
+    ],
+    "checks": [
+      {
+        "id": "completeness",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": true,
+        "percentage": 100.0,
+        "findings": []
+      },
+      {
+        "id": "pins",
+        "version": "1.0.0",
+        "applicable": false,
+        "success": true,
+        "findings": []
+      },
+      {
+        "id": "plan-conformance",
+        "version": "1.0.0",
+        "applicable": true,
+        "success": false,
+        "percentage": 71.42857142857143,
+        "findings": [
+          {
+            "category": "trial-count-mismatch",
+            "classification": "test_system",
+            "summary": "The plan has 3 trials and the lock's plan trial count is 4."
+          },
+          {
+            "category": "command-speed-mismatch",
+            "classification": "test_system",
+            "summary": "The plan's command_speed is 0.5 and the lock's is 1.0."
+          }
+        ]
+      }
+    ]
+  },
+  "descriptor": {
+    "title": "Run Integrity",
+    "purpose": "Judges whether the run and the test system can be trusted.",
+    "version": "1.1.1",
+    "kind": "Test system",
+    "source": "Living Proof Labs",
+    "tier": "test_system_status",
+    "icon": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M6.5 12.5h3l1.2-3 2.2 7 1.6-4H17.5\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
+    "icon_accessible_name": "Run Integrity",
+    "details_copy": "The plan has 3 trials and the lock's plan trial count is 4. The plan's command_speed is 0.5 and the lock's is 1.0. Not checked: specs, runner, verifier, world, configuration.",
+    "findings": [
+      {
+        "text": "The plan has 3 trials and the lock's plan trial count is 4.",
+        "severity": "Needs attention"
+      },
+      {
+        "text": "The plan's command_speed is 0.5 and the lock's is 1.0.",
+        "severity": "Needs attention"
+      }
+    ]
+  }
+}
