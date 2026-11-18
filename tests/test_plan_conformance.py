@@ -237,6 +237,20 @@ def test_good_run_conforms(tmp_path: Path) -> None:
     assert base._validate(document) == []
 
 
+def test_the_summary_says_whether_the_lock_was_compared(tmp_path: Path) -> None:
+    document, _ = _run_check(GOOD, tmp_path / "with", None)
+    assert (
+        "The plan, the trials and the lock agree on the trial count."
+        in (document["descriptor"]["success_copy"])
+    )
+    assert "Not checked: the plan against the lock" not in document["descriptor"]["success_copy"]
+    document, _ = _run_check(base.FIXTURES / "good", tmp_path / "without", None)
+    copy_ = document["descriptor"]["success_copy"]
+    assert "The plan and the trials agree on the trial count." in copy_
+    assert "the lock agree" not in copy_
+    assert "Not checked: the plan against the lock." in copy_
+
+
 def test_real_run_conforms(tmp_path: Path) -> None:
     """The evidence folder of a real run: no command_speed in its plan, a lock that agrees."""
     document, check = _run_check(REAL, tmp_path)
