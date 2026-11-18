@@ -12,6 +12,8 @@ python -m livingproof_evaluator_run evidence/manifest.json --out result.json
 
 `pins` 1.0.0 compares the pins the verification lock declares with what the run recorded: world, configuration and runner today. Specs and verifier are reported as not checked until the evidence records them. See [the checks](docs/index.md#checks).
 
+`plan-conformance` 1.0.0 checks that the trials that ran are the trials that were planned: the plan, `trials.count`, the number of `trials.results` entries and the lock's plan agree on the trial count and the command speed, and the indexes are exactly 1 to N with each path `trials/trial-NN.json` for its own index. A run whose preconditions are unmet is not applicable. See [the checks](docs/index.md#checks).
+
 The result is a `livingproof-evaluator-result/1.1.0` document. A failed check reports test-system status `ERROR` and conclusion `INCONCLUSIVE`. It never changes a robot grade.
 
 **Documentation** — [manual source](docs/index.md)
