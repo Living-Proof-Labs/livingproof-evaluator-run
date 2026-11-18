@@ -1,4 +1,4 @@
-"""Evaluate completeness, pins, plan-conformance and termination (all 1.0.0)."""
+"""Evaluate completeness, pins, plan-conformance, termination and recording (all 1.0.0)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from livingproof_evaluator_run import pins, plan_conformance, termination
+from livingproof_evaluator_run import pins, plan_conformance, recording, termination
 from livingproof_evaluator_run.plain import (
     DESCRIPTOR_LIMITS,
     FINDING_LIMITS,
@@ -48,8 +48,12 @@ class Report:
     shown: list[dict] = field(default_factory=list)
 
 
-def evaluate_evidence(manifest_path: Path, out: Path) -> int:
-    """Write a 1.1.0 integrity result for the evidence manifest at ``manifest_path``."""
+def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None) -> int:
+    """Write a 1.1.0 integrity result for the evidence manifest at ``manifest_path``.
+
+    ``media`` is the directory holding ``media.json`` and ``mcap/`` (the media job's artifact);
+    without it the ``recording`` check is not applicable.
+    """
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     planned = _planned_count(manifest)
@@ -99,6 +103,7 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
             termination.from_evidence(manifest, manifest_path, planned, results, complete_indexes)
         )
     )
+    reports.append(_recording(recording.from_evidence(manifest, media, planned, results)))
     return _write_result(
         out,
         run_id=str(manifest.get("run_id") or "run"),
@@ -108,14 +113,17 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
     )
 
 
-def evaluate(source: Path, out: Path) -> int:
-    """Evaluate an evidence manifest or a livingproof-evaluator-request."""
+def evaluate(source: Path, out: Path, media: Path | None = None) -> int:
+    """Evaluate an evidence manifest or a livingproof-evaluator-request.
+
+    ``media`` applies to a manifest only; a request carries its recording evidence.
+    """
     source = Path(source)
     document = json.loads(source.read_text(encoding="utf-8"))
     fmt = document.get("format")
     if isinstance(fmt, str) and fmt.startswith("livingproof-evaluator-request/"):
         return _evaluate_request(document, source, out)
-    return evaluate_evidence(source, out)
+    return evaluate_evidence(source, out, media)
 
 
 def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
@@ -178,6 +186,7 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     reports.append(_pins(pins.from_request(payload)))
     reports.append(_plan_conformance(plan_conformance.from_request(payload)))
     reports.append(_termination(termination.from_request(payload)))
+    reports.append(_recording(recording.from_request(payload)))
     # Overflow counts every descriptor finding, including pins, plan-conformance
     # and termination, so a non-plain trial id at the 50th completeness slot can
     # be dropped from the descriptor.
@@ -361,6 +370,39 @@ def _termination(outcome: termination.Outcome) -> Report:
     return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
 
 
+def _recording(outcome: recording.Outcome) -> Report:
+    """recording 1.0.0. Nothing judged is not applicable, never a pass.
+
+    ``limits`` is present exactly when the check is applicable, and equals the evidence's gap limit.
+    """
+    check = {
+        "id": recording.RECORDING_ID,
+        "version": recording.RECORDING_VERSION,
+        "applicable": outcome.applicable,
+        "success": not outcome.findings,
+    }
+    if outcome.applicable:
+        check["percentage"] = outcome.percentage
+        check["limits"] = outcome.limits
+    check["findings"] = outcome.findings
+    shown = [
+        {
+            "text": _clip(item["summary"], 280),
+            "severity": "Needs attention",
+            "trial": item["trial_id"],
+        }
+        for item in outcome.findings
+    ]
+    success = None
+    if outcome.applicable and not outcome.findings:
+        gap = outcome.limits["max_gap_seconds"]
+        success = (
+            "Every recording read is a usable MCAP file that matches media.json,"
+            f" with no gap over {gap} s."
+        )
+    return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
+
+
 _ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4})")
 
 
@@ -433,10 +475,12 @@ def _write_result(
     else:
         shown = all_shown
     if success:
-        parts = [report.success_copy for report in reports if report.success_copy] + (
-            [notes] if notes else []
-        )
-        descriptor["success_copy"] = _clip(" ".join(parts), 400)
+        # The copy is at most 400 characters. A sentence that says a check passed is dropped,
+        # last check first, before a note about what was not checked is ever cut.
+        parts = [report.success_copy for report in reports if report.success_copy]
+        while parts and len(" ".join([*parts, notes] if notes else parts)) > 400:
+            parts.pop()
+        descriptor["success_copy"] = _clip(" ".join([*parts, notes] if notes else parts), 400)
     else:
         kept = all_shown[: MAX_FINDINGS - 1] if overflow_note else shown
         problems = " ".join(item["text"] for item in kept)

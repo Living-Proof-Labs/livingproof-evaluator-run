@@ -263,7 +263,13 @@ def test_real_run_conforms(tmp_path: Path) -> None:
 
 def test_checks_are_reported_in_order(tmp_path: Path) -> None:
     document, _ = _run_check(GOOD, tmp_path)
-    assert [c["id"] for c in _checks(document)] == ["completeness", "pins", CHECK, "termination"]
+    assert [c["id"] for c in _checks(document)] == [
+        "completeness",
+        "pins",
+        CHECK,
+        "termination",
+        "recording",
+    ]
 
 
 def test_completeness_fixture_without_a_lock_block_passes(tmp_path: Path) -> None:

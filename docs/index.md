@@ -5,14 +5,18 @@ Evaluates run infrastructure and evidence suitability for judging robot capabili
 ## Start here
 
 The first slice is a completeness check on hallway evidence: planned trial
-count versus observation files present, and declared digests matching. Three checks
-follow: `pins`, `plan-conformance` and `termination`. It reports test-system status only. It never
+count versus observation files present, and declared digests matching. Four checks
+follow: `pins`, `plan-conformance`, `termination` and `recording`. It reports test-system status only. It never
 grades the robot. Later checks are added one
 at a time; see [issue 3](https://github.com/Living-Proof-Labs/livingproof-evaluator-run/issues/3).
 
 ```bash
 python -m livingproof_evaluator_run evidence/manifest.json --out result.json
+python -m livingproof_evaluator_run evidence/manifest.json --media media --out result.json
 ```
+
+`--media` is the media job's artifact (`media.json` and `mcap/`) and is optional. See
+`recording` below.
 
 ## Checks
 
@@ -149,6 +153,68 @@ reports `ended-by-timeout` or `ended-by-crash` for it, and the stop reasons are 
 `integrity.evidence["termination"]` as the contract defines them (already in the contract's
 words, so nothing is mapped). The tests run the contract's reference rules against these on 600
 generated cases.
+
+- `recording` 1.0.0: each recording that is present is a usable MCAP file that matches
+  `media.json` and the run evidence. A breach is a test-system finding that names the trial;
+  it never changes a robot grade or a trial's own status.
+
+**Where the recordings come from.** livingproof-sim-mujoco's `media` module writes
+`mcap/trial-NN.mcap` for every trial and `media.json`
+(`livingproof-hallway-media/2.0.0`: `trials[].index`, `observation_sha256` and
+`mcap.{path,bytes,sha256}`) in capability-verifier's optional `media` job, which uploads them as
+the artifact `<prefix>mcap-<configuration>`. The evidence manifest records neither, so the
+evaluator takes the artifact's directory as `--media DIR`. The runner re-runs each trial for its
+recording and keeps the file only if the observation hashes to the evidence's digest, which is why
+`observation_sha256` is the link back to `trials.results[].sha256`.
+
+| Where it is read | What |
+| --- | --- |
+| the recording | `DIR/<mcap.path>` for each trial `media.json` lists, read with the `mcap` package |
+| the size and digest it should have | `mcap.bytes` and `mcap.sha256` in `media.json` |
+| the observation it belongs to | `observation_sha256` in `media.json`, against `trials.results[].sha256` in the manifest |
+| the gap limit | `plan.recording.max_gap_seconds` in the manifest, else the same key in the embedded lock's plan. **No default.** |
+| the required channels | `plan.recording.required_channels`, else the lock's plan, else `/base_pose` and `/joint_states` (the two channels the media job always writes), and the summary says so |
+
+**The gap limit.** It comes from the evidence and from nowhere else. A gap equal to the limit is
+not a finding; only a larger one is. When the check is applicable its `limits.max_gap_seconds` is
+exactly the evidence's value. A value that is not a finite number above zero is not used. With no
+usable limit the check is not applicable even when media is present, and the summary says that
+it declares none and there is no default: the check never assumes one. No plan declares a limit
+today. The `0.1` s in the contract's examples is a proposal that has not been approved, and
+nothing here uses it.
+
+| Category | When |
+| --- | --- |
+| `mcap-incomplete` | the file does not open, or has no valid footer and summary, or a chunk fails its CRC. It is the only finding for that cause: the channels of a file that could not be read are not also reported as `missing-channel` |
+| `missing-channel` | a required channel is absent or has no messages |
+| `timestamps-backwards` | a channel has a message earlier than the one before it (counted per channel) |
+| `message-gap-exceeded` | the largest gap between consecutive messages on a channel, in log-time order, is over the limit. Messages written out of order are not a gap; they are `timestamps-backwards` |
+| `media-file-mismatch` | the file's size or sha256 differs from `media.json` |
+| `observation-link-mismatch` | `observation_sha256` in `media.json` differs from the run evidence |
+
+The share is the judged recordings without a finding over the judged recordings. A recording is
+judged when `media.json` lists a planned trial and its file is there; a recording that is not
+there is left to `completeness`. `completeness` on a manifest does not look at recordings yet, so
+the summary names the trials that were not judged. With nothing judged, or no media, the check is
+not applicable: it reports no percentage and no `limits`. A run with no media passes as it did
+before this check, and its card carries no note about it.
+
+**What runs today, and what waits.** Run by hand with `--media` on a downloaded media artifact,
+the check works as above once the evidence declares a gap limit. In the capability-verifier
+workflow it cannot: the `run-integrity` job needs only `plan` and `evidence`, so it is not given
+the recordings or `media.json` (capability-verifier#156) and the check is not applicable on every
+run. Until something declares `plan.recording.max_gap_seconds` it is not applicable even then.
+The check is tested against a real recording from verification run 43402628666 and synthetic
+ones written as the runner writes them; it has not run inside the workflow. On a
+`livingproof-evaluator-request` the facts come from `integrity.evidence["recording"]` as the
+contract defines them, and only recordings the request's trials report as `present` are judged;
+the tests run the contract's reference rules against ours on 600 generated cases.
+
+**Two recordings per trial.** livingproof-sim-mujoco#108 would split the recording into a
+robot-reported and a ground-truth file and version `media.json`. This check does not implement
+that. The rules (`recording.judge`) work on facts and know nothing of where they were read, and
+the reader (`mcap_reader`) knows nothing of the rules, so a second file is another reading step,
+and a new `media.json` format is read beside the 2.0.0 one rather than changing a rule.
 
 Start with this scope and the [verification limits](verification.md). To propose
 behavior, use
