@@ -1,4 +1,4 @@
-"""Evaluate completeness, pins and plan-conformance (all 1.0.0) on evidence or a request."""
+"""Evaluate completeness, pins, plan-conformance and termination (all 1.0.0)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from livingproof_evaluator_run import pins, plan_conformance
+from livingproof_evaluator_run import pins, plan_conformance, termination
 from livingproof_evaluator_run.plain import (
     DESCRIPTOR_LIMITS,
     FINDING_LIMITS,
@@ -59,6 +59,7 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
     trials: list[dict] = []
     inputs = [_input("manifest", manifest_path)]
     complete = 0
+    complete_indexes: set[int] = set()
     for index in range(1, planned + 1):
         trial_id = f"trial-{index:02d}"
         entry = results.get(index)
@@ -86,11 +87,17 @@ def evaluate_evidence(manifest_path: Path, out: Path) -> int:
             trials.append(_trial_status(trial_id, ok=False))
             continue
         complete += 1
+        complete_indexes.add(index)
         trials.append(_trial_status(trial_id, ok=True))
     reports = [_completeness(findings, complete, planned)]
     outcome = pins.from_evidence(manifest, manifest_path)
     reports.append(_pins(outcome))
     reports.append(_plan_conformance(plan_conformance.from_evidence(manifest)))
+    reports.append(
+        _termination(
+            termination.from_evidence(manifest, manifest_path, planned, results, complete_indexes)
+        )
+    )
     return _write_result(
         out,
         run_id=str(manifest.get("run_id") or "run"),
@@ -138,6 +145,18 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
             )
             trials.append(_trial_status(trial_id, ok=False))
             continue
+        ended = trial.get("termination")
+        if ended in ("timeout", "crash"):
+            # completeness owns a trial that did not end on its own; termination refers to this.
+            findings.append(
+                _finding(
+                    f"ended-by-{ended}",
+                    trial_id,
+                    f"The trial did not end on its own: it ended by {ended}.",
+                )
+            )
+            trials.append(_trial_status(trial_id, ok=False))
+            continue
         observations = (
             trial.get("observations") if isinstance(trial.get("observations"), dict) else {}
         )
@@ -157,6 +176,7 @@ def _evaluate_request(request: dict, _source: Path, out: Path) -> int:
     reports = [_completeness(findings, complete, len(planned))]
     reports.append(_pins(pins.from_request(payload)))
     reports.append(_plan_conformance(plan_conformance.from_request(payload)))
+    reports.append(_termination(termination.from_request(payload)))
     return _write_result(
         out,
         run_id=str(manifest.get("id") or "run"),
@@ -294,6 +314,36 @@ def _plan_conformance(outcome: plan_conformance.Outcome) -> Report:
         success_copy=f"{agree} agree on the trial count.",
         notes=outcome.notes,
     )
+
+
+def _termination(outcome: termination.Outcome) -> Report:
+    """termination 1.0.0. No judged trial is not applicable, never a pass.
+
+    A referral points at a ``completeness`` finding and is not a finding: it changes neither
+    ``success`` nor ``percentage``. ``referrals`` is always present on this check.
+    """
+    check = {
+        "id": termination.TERMINATION_ID,
+        "version": termination.TERMINATION_VERSION,
+        "applicable": outcome.applicable,
+        "success": not outcome.findings,
+    }
+    if outcome.applicable:
+        check["percentage"] = outcome.percentage
+    check["findings"] = outcome.findings
+    check["referrals"] = outcome.referrals
+    shown = [
+        {
+            "text": _clip(item["summary"], 280),
+            "severity": "Needs attention",
+            "trial": item["trial_id"],
+        }
+        for item in outcome.findings
+    ]
+    success = None
+    if outcome.applicable and not outcome.findings:
+        success = "Every trial that ended on its own stopped for a reason the plan allows."
+    return Report(check, success_copy=success, notes=outcome.notes, shown=shown)
 
 
 def _clip(text: str, limit: int) -> str:
