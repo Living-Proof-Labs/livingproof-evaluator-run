@@ -109,6 +109,27 @@ def test_an_lz4_bomb_is_refused_fast_and_small(tmp_path: Path) -> None:
     _refused(_probe(bombs.write(tmp_path / "bomb.mcap", data)))
 
 
+def test_a_chunk_of_millions_of_tiny_records_is_refused_fast(tmp_path: Path) -> None:
+    """Under the byte limits (24 MiB, honestly declared) but 2.8 million records: the parse, not
+    the memory, is what would take the time."""
+    size = 24 << 20
+    data = bombs.mcap_with_chunk(bombs.empty_records_zstd(size), declared=size - size % 9)
+    result = _probe(bombs.write(tmp_path / "records.mcap", data))
+    _refused(result)
+    assert "records" in result["reason"]
+
+
+def test_many_chunks_each_under_the_chunk_limit_are_refused_in_total(tmp_path: Path) -> None:
+    """Ten chunks of 30 MiB: each is allowed, together they are 300 MiB, over 256 MiB."""
+    size = 30 << 20
+    data = bombs.mcap_with_chunks([(bombs.one_record_zstd(size), size)] * 10)
+    result = _probe(bombs.write(tmp_path / "many.mcap", data))
+    assert result["elapsed"] < SECONDS * 2, f"took {result['elapsed']:.1f} s"
+    assert result["cap_exceeded"] is True
+    assert "in total" in result["reason"]
+    assert result["rss_kb"] < RSS_KB
+
+
 def test_messages_raises_a_read_limit_error_for_a_bomb(tmp_path: Path) -> None:
     path = bombs.write(tmp_path / "bomb.mcap", bombs.mcap_with_chunk(bombs.zeros_zstd(1 << 28)))
     with pytest.raises(mcap_reader.ReadCapError, match="limit"):

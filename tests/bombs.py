@@ -63,32 +63,55 @@ def mcap_with_chunk(
     so a reader must walk the data section.
     """
     claimed = EXPANDS_TO if declared is None else declared
+    return mcap_with_chunks([(compressed, claimed)], compression=compression, summary=summary)
+
+
+def mcap_with_chunks(
+    chunks: list[tuple[bytes, int]], *, compression: str = "zstd", summary: bool = True
+) -> bytes:
+    """An MCAP with one chunk per ``(compressed, claimed uncompressed size)`` pair."""
     out = bytearray(MAGIC)
     out += _record(HEADER, _string("") + _string("bomb"))
-    start = len(out)
-    body = (
-        struct.pack("<QQQI", 0, 0, claimed, 0)
-        + _string(compression)
-        + struct.pack("<Q", len(compressed))
-        + compressed
-    )
-    out += _record(CHUNK, body)
-    chunk_length = len(out) - start
+    placed = []
+    for compressed, claimed in chunks:
+        start = len(out)
+        body = (
+            struct.pack("<QQQI", 0, 0, claimed, 0)
+            + _string(compression)
+            + struct.pack("<Q", len(compressed))
+            + compressed
+        )
+        out += _record(CHUNK, body)
+        placed.append((start, len(out) - start, len(compressed), claimed))
     out += _record(DATA_END, struct.pack("<I", 0))
     if not summary:
         out += _record(FOOTER, struct.pack("<QQI", 0, 0, 0)) + MAGIC
         return bytes(out)
     summary_start = len(out)
-    index = (
-        struct.pack("<QQQQ", 0, 0, start, chunk_length)
-        + struct.pack("<I", 0)  # no message index offsets
-        + struct.pack("<Q", 0)
-        + _string(compression)
-        + struct.pack("<QQ", len(compressed), claimed)
-    )
-    out += _record(CHUNK_INDEX, index)
+    for start, length, size, claimed in placed:
+        out += _record(
+            CHUNK_INDEX,
+            struct.pack("<QQQQ", 0, 0, start, length)
+            + struct.pack("<I", 0)  # no message index offsets
+            + struct.pack("<Q", 0)
+            + _string(compression)
+            + struct.pack("<QQ", size, claimed),
+        )
     out += _record(FOOTER, struct.pack("<QQI", summary_start, 0, 0)) + MAGIC
     return bytes(out)
+
+
+def one_record_zstd(size: int) -> bytes:
+    """A zstd frame of ``size`` bytes that is a single record (opcode 0, the rest its body): the
+    fewest records a chunk of that size can hold."""
+    body = struct.pack("<BQ", 0, size - 9) + b"\0" * (size - 9)
+    return zstandard.ZstdCompressor(level=3).compress(body)
+
+
+def empty_records_zstd(size: int) -> bytes:
+    """A zstd frame of ``size`` bytes of nine-byte records (opcode 0, length 0): the most records
+    a chunk of that size can hold."""
+    return zstandard.ZstdCompressor(level=3).compress(b"\0" * (size - size % 9))
 
 
 def write(path: Path, data: bytes) -> Path:
