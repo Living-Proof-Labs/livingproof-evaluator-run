@@ -5,8 +5,8 @@ Evaluates run infrastructure and evidence suitability for judging robot capabili
 ## Start here
 
 The first slice is a completeness check on hallway evidence: planned trial
-count versus observation files present, and declared digests matching. Two checks
-follow: `pins` and `plan-conformance`. It reports test-system status only. It never
+count versus observation files present, and declared digests matching. Three checks
+follow: `pins`, `plan-conformance` and `termination`. It reports test-system status only. It never
 grades the robot. Later checks are added one
 at a time; see [issue 3](https://github.com/Living-Proof-Labs/livingproof-evaluator-run/issues/3).
 
@@ -91,6 +91,56 @@ follows the contract's reference rules (`tests/integrity_rules.py` in the contra
 tests run both against 600 generated cases. Seeds do not exist in evidence 2.0.0, so the
 indexes stand for them; if seeds return in a later evidence version that is a new check
 version.
+
+- `termination` 1.0.0: every trial that ended on its own records a stop reason, and the plan
+  allows it. `completeness` owns a timeout or a crash, so `termination` never raises a finding
+  for one; it lists the trial under `referrals` with the `completeness` category that reports
+  it (`ended-by-timeout` or `ended-by-crash`). A referral is not a finding and changes neither
+  `success` nor the percentage, so each ending is reported once.
+
+| Where it is read | What |
+| --- | --- |
+| the trial's stop reason | `end` in the trial's observation file, `trials/trial-NN.json` |
+| the manifest's copy | `trials.results[].outcome` |
+| the plan's allowed list | `plan.allowed_stop_reasons` in the manifest, else the same key in the embedded lock's plan, else the default |
+
+The runner's words map to the contract's stop reasons: `crossed_exit` is `mission-done`,
+`left_hallway` and `left_world` are `left-world`, `time_limit` is `time-limit`, `non_finite_state` is
+`simulation-broken`, and `adapter_done` is `adapter-or-scenario-done` (the word the contract's
+own examples use; no runner writes it today). A word with no mapping is kept as written and is
+reported as `unknown-stop-reason`.
+
+**The default allowed list** is `time-limit`, `mission-done`, `left-world` and
+`adapter-or-scenario-done`. It leaves out `simulation-broken`, so a trial whose physics state
+went non-finite is a `disallowed-stop-reason` finding unless the plan says it is allowed. A
+declaration that is not a list, or names no known stop reason, is not used: the default applies
+and the summary says so. A malformed declaration can therefore never allow more than the default.
+No plan declares a list today, so the default applies to every run.
+
+| Category | When |
+| --- | --- |
+| `missing-stop-reason` | the trial file has no `end`, or is not a JSON object |
+| `unknown-stop-reason` | the stop reason is outside the vocabulary, or is not text |
+| `disallowed-stop-reason` | the reason is in the vocabulary and the plan does not allow it |
+| `stop-reason-mismatch` | the observation and the manifest's `outcome` differ (a missing `outcome` is not a mismatch) |
+
+Findings carry the trial id and never a verdict. The share is the judged trials without a
+finding over the judged trials; `time-limit` and `left-world` are clean endings here, and what
+they mean for the robot is for the Scenario evaluator. The findings do not change a trial's own
+status: that stays with `completeness`, as in the contract's examples.
+
+On a manifest only the trials `completeness` found complete are judged, so a missing or
+hash-mismatched trial file stays a `completeness` finding and is not repeated. With no judged
+trial the check is not applicable. **What it cannot see:** an evidence manifest records no
+timeout, crash or killed process, so on a manifest `referrals` is always empty and a crash is
+only visible as a missing trial file (`completeness`). Recording them is
+[livingproof-sim-mujoco#105](https://github.com/Living-Proof-Labs/livingproof-sim-mujoco/issues/105)
+and [capability-verifier#155](https://github.com/Living-Proof-Labs/capability-verifier/issues/155).
+On a `livingproof-evaluator-request` each trial carries its `termination`, `completeness`
+reports `ended-by-timeout` or `ended-by-crash` for it, and the stop reasons are read from
+`integrity.evidence["termination"]` as the contract defines them (already in the contract's
+words, so nothing is mapped). The tests run the contract's reference rules against these on 600
+generated cases.
 
 Start with this scope and the [verification limits](verification.md). To propose
 behavior, use

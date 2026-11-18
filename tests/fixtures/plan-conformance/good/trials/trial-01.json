@@ -1,4 +1,5 @@
 {
-  "index": 1,
-  "outcome": "crossed_exit"
+  "format": "livingproof-route-observation/0.1.0",
+  "end": "crossed_exit",
+  "index": 1
 }

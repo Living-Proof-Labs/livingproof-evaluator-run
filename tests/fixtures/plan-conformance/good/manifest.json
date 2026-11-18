@@ -32,17 +32,20 @@
       {
         "index": 1,
         "path": "trials/trial-01.json",
-        "sha256": "6259fc44635a34baae181e3ecebe841cd48c2bfbb76aef89ba0285cfcea4f8ef"
+        "sha256": "98c84d7f4730189889d264ba1bfe042275a9c2fcde144f946f8a800bcb9fc48a",
+        "outcome": "crossed_exit"
       },
       {
         "index": 2,
         "path": "trials/trial-02.json",
-        "sha256": "413d428cef5daecba9ee7f4438728b0dc46a7ca62402e62f79f7e14b60350675"
+        "sha256": "b9d2361f13cad48f756d824b66d601ca06ca92774902971ad1f4dc0cd62cc25a",
+        "outcome": "crossed_exit"
       },
       {
         "index": 3,
         "path": "trials/trial-03.json",
-        "sha256": "623575b25df0cef3f74c281565f4813c1f369be915ce3bc34f576362a8539170"
+        "sha256": "42d67b6393a95328a877b4ef758c1b62441f4fa2d78a968125bb3adacf211ee8",
+        "outcome": "crossed_exit"
       }
     ]
   }
