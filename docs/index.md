@@ -169,8 +169,9 @@ reports `ended-by-timeout` or `ended-by-crash` for it, and the stop reasons are 
 words, so nothing is mapped). The tests run the contract's reference rules against these on 600
 generated cases.
 
-- `recording` 1.1.0: each recording that is present is a usable MCAP file that matches
-  `media.json` and the run evidence. A breach is a test-system finding that names the trial;
+- `recording` 1.2.0: each recording that is present is a usable MCAP file that matches
+  `media.json` and the run evidence. A recording the reader refuses at a size limit is still
+  present and is `recording-over-limit`. A breach is a test-system finding that names the trial;
   it never changes a robot grade or a trial's own status.
 
 **Where the recordings come from.** livingproof-sim-mujoco's `media` module writes
@@ -203,6 +204,7 @@ nothing here uses it.
 | `mcap-incomplete` | **1.0.0 only.** At 1.1.0 a file with no valid footer is truncated, and `completeness` reports it as `truncated-recording`. This check never emits it |
 | `missing-channel` | a required channel is absent or has no messages |
 | `timestamps-backwards` | a channel has a message earlier than the one before it (counted per channel) |
+| `recording-over-limit` | **1.2.0.** The reader stopped at a size limit (`chunk-bytes`, `total-bytes`, `records` or `chunks`); the summary names it and its value. The trial is judged and fails closed. It is not truncation, so `completeness` reports nothing and no other recording finding follows |
 | `message-gap-exceeded` | the largest gap between consecutive messages on a channel, in log-time order, is over the limit. Messages written out of order are not a gap; they are `timestamps-backwards` |
 | `media-file-mismatch` | the file's size or sha256 differs from `media.json` |
 | `observation-link-mismatch` | `observation_sha256` in `media.json` differs from the run evidence |
