@@ -141,13 +141,19 @@ def test_1_1_0_selection_keeps_not_present_as_the_reason_for_an_over_cap_file(
     assert outcome.not_checked == [{"trial_id": "trial-03", "reason": "not-present"}]
 
 
-def test_an_over_cap_file_is_not_a_clean_run_even_when_no_gap_limit_is_declared(
-    tmp_path: Path,
-) -> None:
+def test_an_over_cap_file_with_no_gap_limit_is_not_reported_by_recording(tmp_path: Path) -> None:
+    """Known limit of recording 1.2.0, documented in docs/index.md. With no gap limit declared,
+    recording is not applicable, so an over-cap file is not reported and the run reads clean.
+    Reporting it would need an applicable check without ``limits``, which the contract's schema
+    (livingproof-evaluator v1.3.4) rejects: ``limits`` is required whenever ``applicable`` is true.
+    Declaring ``plan.recording.max_gap_seconds`` (#26) removes the gap."""
     folder = rt._evidence(tmp_path, gap=None)
     media = rt._media(tmp_path, folder, edit=lambda i, p: _bomb(p) if i == 3 else None)
     document = rt._run(folder, tmp_path, media)
-    assert document["integrity"]["run"]["success"] is False
+    check = rt._check(document)
+    assert check["applicable"] is False and check["findings"] == []
+    assert document["integrity"]["run"]["success"] is True
+    assert rt.base._validate(document) == []
 
 
 def test_a_run_with_no_over_cap_file_and_no_gap_limit_is_not_applicable(tmp_path: Path) -> None:

@@ -267,7 +267,7 @@ hashed in full against `media.json`; the limits do not cap its size on disk.
 the check works as above once the evidence declares a gap limit. In the capability-verifier
 workflow it cannot: the `run-integrity` job needs only `plan` and `evidence`, so it is not given
 the recordings or `media.json` (capability-verifier#156) and the check is not applicable on every
-run. Until something declares `plan.recording.max_gap_seconds` it is not applicable even then.
+run. Until something declares `plan.recording.max_gap_seconds` it is not applicable even then. This includes a recording the reader refused at a size limit: with no limit declared nothing reports it, because an applicable result must carry `limits` (the contract's schema) and none exists. Declaring the limit closes this.
 The check is tested against a real recording from verification run 43402628666 and synthetic
 ones written as the runner writes them; it has not run inside the workflow. On a
 `livingproof-evaluator-request` the facts come from `integrity.evidence["recording"]` as the
