@@ -53,7 +53,16 @@ class ReadError(Exception):
 
 
 class ReadCapError(ReadError):
-    """The recording is bigger than the reader's caps allow, so it was not read."""
+    """The recording is bigger than the reader's caps allow, so it was not read.
+
+    ``limit`` names the cap (``chunk-bytes``, ``total-bytes``, ``records`` or ``chunks``, the
+    contract's words) and ``value`` is its value from ``Caps``.
+    """
+
+    def __init__(self, message: str, limit: str | None = None, value: int | None = None) -> None:
+        super().__init__(message)
+        self.limit = limit
+        self.value = value
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,7 @@ class Inspection:
     reason: str | None
     channels: tuple[ChannelStats, ...]
     cap_exceeded: bool = False
+    over_limit: tuple[str, int] | None = None  # the cap that was hit and its value
 
 
 def channel_stats(
@@ -189,7 +199,8 @@ def inspect(path: Path, caps: Caps = STANDARD_CAPS) -> Inspection:
                 topics,
             )
     except ReadCapError as exc:
-        return Inspection(False, str(exc), (), True)
+        hit = (exc.limit, exc.value) if exc.limit and exc.value is not None else None
+        return Inspection(False, str(exc), (), True, hit)
     except Exception as exc:
         return Inspection(False, _reason(exc), ())
     return Inspection(reason is None, reason, found)
@@ -224,21 +235,27 @@ class _Meter:
         self.chunks += 1
         if self.chunks > self.caps.max_chunks:
             raise ReadCapError(
-                f"the recording holds more chunks than the limit of {self.caps.max_chunks:,} chunks"
+                f"the recording holds more chunks than the limit of {self.caps.max_chunks:,} chunks",
+                "chunks",
+                self.caps.max_chunks,
             )
 
     def bytes(self, size: int) -> None:
         self.total += size
         if self.total > self.caps.max_total_bytes:
             raise ReadCapError(
-                f"the chunks expand past the limit of {_mib(self.caps.max_total_bytes)} in total"
+                f"the chunks expand past the limit of {_mib(self.caps.max_total_bytes)} in total",
+                "total-bytes",
+                self.caps.max_total_bytes,
             )
 
     def add_records(self, count: int) -> None:
         self.records += count
         if self.records > self.caps.max_records:
             raise ReadCapError(
-                f"the recording holds more records than the limit of {self.caps.max_records:,} records"
+                f"the recording holds more records than the limit of {self.caps.max_records:,} records",
+                "records",
+                self.caps.max_records,
             )
 
 
@@ -298,7 +315,9 @@ def _scan_chunk(stream, body: int, size: int, meter: _Meter) -> None:
         return
     if declared > caps.max_chunk_bytes:
         raise ReadCapError(
-            f"a chunk claims to expand past the limit of {_mib(caps.max_chunk_bytes)} per chunk"
+            f"a chunk claims to expand past the limit of {_mib(caps.max_chunk_bytes)} per chunk",
+            "chunk-bytes",
+            caps.max_chunk_bytes,
         )
     raw = _bounded(compression, data, caps.max_chunk_bytes)
     if raw is None:
@@ -312,7 +331,9 @@ def _bounded(compression: str, data: bytes, limit: int) -> bytes | None:
 
     Raises ``ReadCapError`` when it would be more than ``limit``.
     """
-    over = ReadCapError(f"a chunk expands past the limit of {_mib(limit)} per chunk")
+    over = ReadCapError(
+        f"a chunk expands past the limit of {_mib(limit)} per chunk", "chunk-bytes", limit
+    )
     if compression == "zstd":
         try:
             stated = zstandard.frame_content_size(data)

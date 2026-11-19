@@ -1,4 +1,4 @@
-"""recording 1.1.0: every recording that is present is a usable MCAP file that matches the run.
+"""recording 1.2.0: every recording that is present is a usable MCAP file that matches the run.
 
 The contract (livingproof-evaluator ``schema/integrity/checks/recording.schema.json`` and
 ``docs/run-integrity.md``, v1.2.0) fixes the rule. A recording that is present must hold every
@@ -65,13 +65,12 @@ from livingproof_evaluator_run import mcap_reader
 from livingproof_evaluator_run.plain import shown
 
 RECORDING_ID = "recording"
-RECORDING_VERSION = "1.1.0"
-PREVIOUS_VERSIONS = ("1.0.0",)
+RECORDING_VERSION = "1.2.0"
+PREVIOUS_VERSIONS = ("1.0.0", "1.1.0")
 # What a 1.0.0 ``mcap-incomplete`` finding says when the reader refused the file for its size
-# (``mcap_reader.Caps``) instead of failing to open it. From 1.1.0 such a file is not readable,
-# so it is ``truncated`` and ``completeness`` reports it (``COMPLETENESS_CAP_SUMMARY`` says why);
-# this check lists the trial ``not-present``. The contract has no finding named for it
-# (livingproof-evaluator#42, owned by Rivet).
+# (``mcap_reader.Caps``) instead of failing to open it. From 1.2.0 such a file is present and
+# judged: ``recording-over-limit`` names the cap and its value (livingproof-evaluator#42), and
+# ``completeness`` reports nothing. At 1.1.0 it was ``truncated`` and listed ``not-present``.
 CAP_SUMMARY = (
     "The recording expands past the evaluator's size limit when decompressed, so it was not read."
 )
@@ -83,7 +82,14 @@ CATEGORIES = (
     "message-gap-exceeded",
     "media-file-mismatch",
     "observation-link-mismatch",
+    "recording-over-limit",
 )
+_OVER_LIMIT_UNITS = {
+    "chunk-bytes": "bytes",
+    "total-bytes": "bytes",
+    "records": None,
+    "chunks": None,
+}
 # What a manifest's plan requires when it declares no channels: the two channels the media job
 # always writes (``/base_pose`` and ``/joint_states``). Versioned with this check.
 DEFAULT_REQUIRED_CHANNELS = ("/base_pose", "/joint_states")
@@ -121,6 +127,8 @@ class Trial:
     media_observation_sha256: object
     evidence_observation_sha256: object
     cap_exceeded: bool = False
+    # From 1.2.0, the reader's cap that the file hit and its value: ``(limit, value)``.
+    over_limit: tuple[str, int] | None = None
 
 
 @dataclass
@@ -202,10 +210,19 @@ def judge(
     the evidence path sets it; a request is judged by the contract.
     """
     old = version == "1.0.0"
+    v12 = version not in ("1.0.0", "1.1.0")
     findings: list[dict] = []
     failing: set[str] = set()
     for trial in trials:
         mine: list[dict] = []
+        if v12 and trial.over_limit is not None:
+            # The reader stopped at a cap, so nothing else can be said of this recording: the
+            # trial is judged and fails closed with this one finding.
+            findings.append(
+                _finding("recording-over-limit", over_limit_summary(*trial.over_limit), trial.id)
+            )
+            failing.add(trial.id)
+            continue
         if not trial.complete:
             if not old:
                 raise ValueError(
@@ -282,6 +299,16 @@ def judge(
     )
 
 
+def over_limit_summary(limit: object, value: object) -> str:
+    """What the contract's ``recording-over-limit`` summary says: the cap and its value."""
+    unit = _OVER_LIMIT_UNITS.get(limit) if isinstance(limit, str) else None
+    measured = f"{_say(value)} {unit}" if unit else _say(value)
+    return (
+        f"The recording expands past the reader's {shown(str(limit))} limit of {measured},"
+        " so it was not fully read."
+    )
+
+
 def _say(value: object) -> str:
     return str(value) if _number(value) else shown(json.dumps(value, default=str))
 
@@ -344,6 +371,8 @@ def from_request(integrity: dict, version: str = RECORDING_VERSION) -> Outcome:
             if not isinstance(entry, dict) or entry.get("id") not in present:
                 continue
             if _dig(entry, "mcap", "state") != "complete":
+                if version not in ("1.1.0",) and isinstance(entry.get("over_limit"), dict):
+                    continue  # the reader stopped at a cap, so the footer may be unknown
                 raise MalformedRequest(
                     f"trial {entry['id']}: recording.state is present but evidence.recording"
                     " says the file is incomplete. A file with no valid footer is truncated:"
@@ -377,6 +406,7 @@ def from_request(integrity: dict, version: str = RECORDING_VERSION) -> Outcome:
         mcap = entry.get("mcap") if isinstance(entry.get("mcap"), dict) else {}
         media = entry.get("media") if isinstance(entry.get("media"), dict) else {}
         found = mcap.get("channels")
+        hit = entry.get("over_limit") if isinstance(entry.get("over_limit"), dict) else None
         trials.append(
             Trial(
                 id=entry["id"],
@@ -397,6 +427,7 @@ def from_request(integrity: dict, version: str = RECORDING_VERSION) -> Outcome:
                 media_sha256=media.get("mcap_sha256"),
                 media_observation_sha256=media.get("observation_sha256"),
                 evidence_observation_sha256=entry.get("evidence_observation_sha256"),
+                over_limit=(hit.get("limit"), hit.get("value")) if hit else None,  # type: ignore[arg-type]
             )
         )
     outcome = judge(channels, limit, trials, version)
@@ -478,11 +509,6 @@ class MediaRead:
         found = self.listed.get(index)
         return found.state if found else None
 
-    def cap_exceeded(self, index: int) -> bool:
-        """True when the reader refused the listed recording for its size, so it was not read."""
-        found = self.listed.get(index)
-        return bool(found and found.inspection and found.inspection.cap_exceeded)
-
 
 def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> MediaRead | None:
     """Read the recordings ``media.json`` lists for the planned trials that have trial evidence.
@@ -521,7 +547,9 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
             read.listed[index] = Listed(index, "empty", entry, mcap, path)
         else:
             inspection = mcap_reader.inspect(path)
-            state = "present" if inspection.complete else "truncated"
+            # A file the reader refused at a cap is present (recording 1.2.0): it is judged and
+            # reported as ``recording-over-limit``, not as truncation.
+            state = "present" if inspection.complete or inspection.cap_exceeded else "truncated"
             read.listed[index] = Listed(index, state, entry, mcap, path, inspection)
     return read
 
@@ -586,7 +614,12 @@ def from_evidence(
             continue
         trial_id = f"trial-{index:02d}"
         # 1.1.0 judges a recording only when it is present. 1.0.0 judged any file there was.
+        refused = found.inspection is not None and found.inspection.cap_exceeded
         if found.path is None or (not old and found.state != "present"):
+            skipped.append(trial_id)
+            continue
+        if version == "1.1.0" and refused:
+            # 1.1.0 knew no finding for it: such a file was not readable, so it was not judged.
             skipped.append(trial_id)
             continue
         inspection = found.inspection or mcap_reader.inspect(found.path)
@@ -596,6 +629,7 @@ def from_evidence(
                 id=trial_id,
                 complete=inspection.complete,
                 cap_exceeded=inspection.cap_exceeded,
+                over_limit=inspection.over_limit if not old else None,
                 bytes=found.path.stat().st_size,
                 sha256=_digest(found.path),
                 channels=[
