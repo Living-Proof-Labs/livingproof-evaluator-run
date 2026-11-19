@@ -578,7 +578,13 @@ def from_evidence(
     if read.problem:
         return _not_applicable(read.problem, version)
     ids = [f"trial-{index:02d}" for index in range(1, planned + 1) if index in results]
-    states = {f"trial-{i:02d}": found.state for i, found in read.listed.items()}
+    # At 1.1.0 a file the reader refused at a cap was truncated, so it is ``not-present``.
+    states = {
+        f"trial-{i:02d}": "truncated"
+        if version == "1.1.0" and found.inspection is not None and found.inspection.cap_exceeded
+        else found.state
+        for i, found in read.listed.items()
+    }
 
     def unjudged(judged: set[str]) -> list[dict]:
         return _items(ids, states, judged)

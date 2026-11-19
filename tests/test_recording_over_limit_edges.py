@@ -134,10 +134,6 @@ def test_1_1_0_selection_does_not_judge_an_over_cap_file_and_adds_no_finding(
     assert [i["trial_id"] for i in outcome.not_checked] == ["trial-03"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#23 changed the 1.1.0 reason from not-present to not-recorded; behaviour was 'as before'",
-)
 def test_1_1_0_selection_keeps_not_present_as_the_reason_for_an_over_cap_file(
     tmp_path: Path,
 ) -> None:
