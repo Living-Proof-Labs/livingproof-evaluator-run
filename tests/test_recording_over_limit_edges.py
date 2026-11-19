@@ -141,11 +141,6 @@ def test_1_1_0_selection_keeps_not_present_as_the_reason_for_an_over_cap_file(
     assert outcome.not_checked == [{"trial_id": "trial-03", "reason": "not-present"}]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#26: with no gap limit declared, recording is not applicable and nothing reports an "
-    "over-cap file, so the run reads COMPLETED 100 (main reported it via completeness)",
-)
 def test_an_over_cap_file_is_not_a_clean_run_even_when_no_gap_limit_is_declared(
     tmp_path: Path,
 ) -> None:
@@ -153,3 +148,13 @@ def test_an_over_cap_file_is_not_a_clean_run_even_when_no_gap_limit_is_declared(
     media = rt._media(tmp_path, folder, edit=lambda i, p: _bomb(p) if i == 3 else None)
     document = rt._run(folder, tmp_path, media)
     assert document["integrity"]["run"]["success"] is False
+
+
+def test_a_run_with_no_over_cap_file_and_no_gap_limit_is_not_applicable(tmp_path: Path) -> None:
+    folder = rt._evidence(tmp_path, gap=None)
+    media = rt._media(tmp_path, folder)
+    document = rt._run(folder, tmp_path, media)
+    check = rt._check(document)
+    assert check["applicable"] is False
+    assert check["findings"] == [] and "limits" not in check
+    assert document["integrity"]["run"]["success"] is True
