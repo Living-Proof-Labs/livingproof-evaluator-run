@@ -51,8 +51,10 @@ CATEGORIES = [
     "message-gap-exceeded",
     "media-file-mismatch",
     "observation-link-mismatch",
+    "recording-over-limit",
 ]
 LIMIT = 0.05  # a test value
+OVER_LIMITS = ["chunk-bytes", "total-bytes", "records", "chunks"]
 
 
 def module():
@@ -138,7 +140,7 @@ def test_a_clean_run_with_media_passes(tmp_path: Path) -> None:
     document, check = _doctored(tmp_path)
     assert check == {
         "id": "recording",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "applicable": True,
         "success": True,
         "percentage": 100,
@@ -155,7 +157,7 @@ def test_no_media_is_not_applicable(tmp_path: Path) -> None:
     document = _run(folder, tmp_path, None)
     assert _check(document) == {
         "id": "recording",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "applicable": False,
         "success": True,
         "findings": [],
@@ -436,7 +438,7 @@ def test_a_1_1_0_recording_check_never_reports_mcap_incomplete(tmp_path: Path) -
         (tmp_path / str(number)).mkdir()
         document, check = _doctored(tmp_path / str(number), edit=edit)
         assert "mcap-incomplete" not in _categories(check)
-        assert check["version"] == "1.1.0"
+        assert check["version"] == "1.2.0"
         found = [f["category"] for c in _checks(document) for f in c["findings"]]
         assert "mcap-incomplete" not in found
 
@@ -922,15 +924,19 @@ def _run_request(request: dict, tmp_path: Path) -> dict:
 
 
 def _as_1_1_0(check: dict, request: dict) -> dict:
-    """The contract keeps its 1.0.0 examples as published. A 1.0.0 check read as 1.1.0 changes
-    its version and gains the ``not_checked`` the reference rule derives from the request."""
-    if check["version"] != "1.0.0":
+    """The contract keeps its earlier examples as published. A 1.0.0 or 1.1.0 check read as 1.2.0
+    changes its version and, from 1.0.0, gains the ``not_checked`` the reference rule derives."""
+    if check["version"] == "1.2.0":
         return check
+    if check["id"] != "recording":
+        return check
+    if check["version"] == "1.1.0":
+        return {**check, "version": "1.2.0"}
     sys.path.insert(0, str(base.CONTRACT / "tests"))
     import integrity_rules
 
-    rule = integrity_rules.recording(request["integrity"], "1.1.0")
-    return {**check, "version": "1.1.0", "not_checked": rule["not_checked"]}
+    rule = integrity_rules.recording(request["integrity"], "1.2.0")
+    return {**check, "version": "1.2.0", "not_checked": rule["not_checked"]}
 
 
 @pytest.mark.parametrize("name", ["clean", "no-media", "not-checked", "none-judged"])
@@ -1007,7 +1013,7 @@ def test_a_request_without_recording_evidence_is_not_applicable(tmp_path: Path) 
     check = _check(_run_request(request, tmp_path))
     assert check == {
         "id": "recording",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "applicable": False,
         "success": True,
         "findings": [],
@@ -1059,8 +1065,14 @@ def _random_request(rng: random.Random) -> dict:
                 }
             )
         link = sha()
+        over = rng.random() < 0.1  # recording 1.2.0 only; the earlier rules ignore it
         entries.append(
             {
+                **(
+                    {"over_limit": {"limit": rng.choice(OVER_LIMITS), "value": rng.randint(1, 99)}}
+                    if over
+                    else {}
+                ),
                 "id": trial_id,
                 "mcap": {
                     "state": rng.choice(["complete"] * 4 + ["incomplete"]),
@@ -1091,7 +1103,7 @@ def _reference(integrity_rules, request: dict, version: str):
         return None
 
 
-@pytest.mark.parametrize("version", ["1.1.0", "1.0.0"])
+@pytest.mark.parametrize("version", ["1.2.0", "1.1.0", "1.0.0"])
 def test_ours_equal_the_contract_reference_rules(version: str) -> None:
     """Each version against the reference rule of that version (the reference defaults to
     1.1.0, so the version is always passed). At 1.1.0 an inconsistent request is rejected by
@@ -1126,10 +1138,11 @@ def test_ours_equal_the_contract_reference_rules(version: str) -> None:
         seen.update(item["category"] for item in expected["findings"])
         reasons.update(item["reason"] for item in expected.get("not_checked", []))
     if version == "1.0.0":
-        assert seen == set(CATEGORIES)
+        assert seen == set(CATEGORIES) - {"recording-over-limit"}
         assert rejected == 0 and not reasons
     else:
-        assert seen == set(CATEGORIES) - {"mcap-incomplete"}
+        gone = {"mcap-incomplete"} | ({"recording-over-limit"} if version == "1.1.0" else set())
+        assert seen == set(CATEGORIES) - gone
         assert rejected > 20
         assert reasons == {"not-present", "not-recorded"}
     assert not_applicable > 20
@@ -1141,7 +1154,7 @@ def test_the_default_version_is_the_current_one_and_is_the_references_default() 
 
     recording = module()
     rng = random.Random(9)
-    assert recording.RECORDING_VERSION == "1.1.0"
+    assert recording.RECORDING_VERSION == "1.2.0"
     compared = 0
     for _ in range(200):
         request = _random_request(rng)

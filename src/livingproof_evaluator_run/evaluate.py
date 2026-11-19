@@ -97,11 +97,7 @@ def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None)
         digest = _sha256(path)
         inputs.append(_input("observations", path, uri=str(entry["path"])))
         mine: list[dict] = []
-        found = completeness.recording_finding(
-            trial_id,
-            read.state(index) if read else None,
-            cap_exceeded=bool(read and read.cap_exceeded(index)),
-        )
+        found = completeness.recording_finding(trial_id, read.state(index) if read else None)
         if found:
             mine.append(found)
         expected = entry.get("sha256")
@@ -441,7 +437,7 @@ def _termination(outcome: termination.Outcome) -> Report:
 
 
 def _recording(outcome: recording.Outcome) -> Report:
-    """recording 1.1.0. Nothing judged is not applicable, never a pass.
+    """recording 1.2.0. Nothing judged is not applicable, never a pass.
 
     ``limits`` is present exactly when the check is applicable, and equals the evidence's gap limit.
     ``not_checked`` lists every trial that was not judged, and the descriptor's note is made from

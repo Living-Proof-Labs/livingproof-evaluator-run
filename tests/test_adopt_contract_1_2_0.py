@@ -56,9 +56,9 @@ def _ids(check: dict) -> list[tuple[str, str]]:
 # The contract that is checked out, and the versions we claim.
 
 
-def test_the_contract_is_pinned_at_v1_2_0() -> None:
+def test_the_contract_is_pinned_at_v1_3_4() -> None:
     text = (ROOT / "tools" / "fetch_contract.py").read_text(encoding="utf-8")
-    assert 'TAG = "v1.2.0"' in text
+    assert 'TAG = "v1.3.4"' in text
     assert "v1.1.0" not in text
 
 
@@ -76,15 +76,19 @@ def test_every_check_is_at_the_version_the_contract_registry_says() -> None:
         "recording": recording.RECORDING_VERSION,
     }
     assert ours == {check: current[check] for check in OURS}
-    assert set(ours.values()) == {"1.1.0"}
-    assert all(previous[check] == ["1.0.0"] for check in OURS)
+    assert ours["recording"] == "1.2.0"
+    assert {v for check, v in ours.items() if check != "recording"} == {"1.1.0"}
+    assert previous["recording"] == ["1.0.0", "1.1.0"]
+    assert all(previous[check] == ["1.0.0"] for check in OURS if check != "recording")
 
 
 def test_a_result_reports_every_check_at_its_current_version(tmp_path: Path) -> None:
     out = tmp_path / "result.json"
     assert evaluate_evidence(base.GOOD, out) == 0
     checks = _load(out)["integrity"]["checks"]
-    assert [(c["id"], c["version"]) for c in checks] == [(c, "1.1.0") for c in OURS]
+    assert [(c["id"], c["version"]) for c in checks] == [
+        (c, "1.2.0" if c == "recording" else "1.1.0") for c in OURS
+    ]
 
 
 @pytest.mark.parametrize("check", ["completeness", "termination"])
@@ -139,9 +143,13 @@ def test_every_published_1_1_0_example_gives_the_published_check(tmp_path: Path)
         document = _run_request(request, tmp_path / name.replace("/", "_"))
         for want in wanted:
             got = _check(document, want["id"])
-            assert got["version"] == "1.1.0", (name, want["id"])
+            ours = "1.2.0" if want["id"] == "recording" else "1.1.0"
+            assert got["version"] == ours, (name, want["id"])
             if want["version"] == "1.1.0":
-                assert _comparable(got) == _comparable(want), (name, want["id"])
+                assert _comparable({**got, "version": "1.1.0"}) == _comparable(want), (
+                    name,
+                    want["id"],
+                )
                 covered.add((name, want["id"]))
         assert base._validate(document) == [], name
     assert PUBLISHED <= covered, PUBLISHED - covered

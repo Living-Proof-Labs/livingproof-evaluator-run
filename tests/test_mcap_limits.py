@@ -255,26 +255,27 @@ def test_a_limit_must_be_a_positive_integer(bad: object) -> None:
 # The finding, end to end through a run.
 
 
-def test_a_bomb_in_a_run_is_one_clear_truncated_recording_finding(tmp_path: Path) -> None:
-    """At recording 1.1.0 a file the reader refused is not read, so it is truncated: completeness
-    reports it once, with the size limit as the reason, and recording lists the trial not-present
-    and emits no mcap-incomplete."""
+def test_a_bomb_in_a_run_is_a_recording_over_limit_finding(tmp_path: Path) -> None:
+    """At recording 1.2.0 (livingproof-evaluator-run#23) a file the reader refused is present, not
+    truncated: completeness reports nothing, and recording judges the trial and fails closed with
+    ``recording-over-limit``, the limit and its value in the summary."""
 
     def swap(index: int, path: Path) -> None:
         if index == 2:
             path.write_bytes(bombs.mcap_with_chunk(bombs.zeros_zstd(1 << 28)))
 
     document, check = base._doctored(tmp_path, edit=swap)
-    assert "mcap-incomplete" not in base._categories(check)
-    assert "missing-channel" not in base._categories(check)
-    assert [(i["trial_id"], i["reason"]) for i in check["not_checked"]][:1] == [
-        ("trial-02", "not-present")
-    ]
+    assert check["version"] == "1.2.0"
+    assert base._categories(check) == ["recording-over-limit"]
+    assert check["not_checked"] == []
+    (found,) = check["findings"]
+    assert found["trial_id"] == "trial-02" and found["classification"] == "test_system"
+    assert found["summary"] == (
+        "The recording expands past the reader's chunk-bytes limit of 33554432 bytes,"
+        " so it was not fully read."
+    )
     completeness = next(c for c in document["integrity"]["checks"] if c["id"] == "completeness")
-    (first,) = [f for f in completeness["findings"] if f["category"] == "truncated-recording"]
-    assert first["trial_id"] == "trial-02"
-    assert first["classification"] == "test_system"
-    assert "size limit" in first["summary"]
+    assert completeness["findings"] == []
     base._conforming_error(document)
 
 
