@@ -928,6 +928,10 @@ def _as_1_1_0(check: dict, request: dict) -> dict:
     changes its version and, from 1.0.0, gains the ``not_checked`` the reference rule derives."""
     if check["version"] == "1.2.0":
         return check
+    if check["id"] != "recording":
+        return check
+    if check["version"] == "1.1.0":
+        return {**check, "version": "1.2.0"}
     sys.path.insert(0, str(base.CONTRACT / "tests"))
     import integrity_rules
 
