@@ -1,7 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Use the shared released dependency policy; the preset itself is tracked before runtime dependencies are introduced.",
+  "description": "Use the released organization preset while enabling Python project dependency coverage.",
   "extends": [
-    "github>Living-Proof-Labs/collaboration-guidelines:renovate-preset#v7.10.8"
+    "github>Living-Proof-Labs/collaboration-guidelines:renovate-preset#v9.7.3"
+  ],
+  "enabledManagers": [
+    "renovate-config",
+    "github-actions",
+    "dockerfile",
+    "docker-compose",
+    "npm",
+    "pip-compile",
+    "custom.regex",
+    "pep621"
   ]
 }
