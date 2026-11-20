@@ -10,7 +10,7 @@ DISPLAY_NAME = "Run Integrity"
 PUBLISHER = "Living Proof Labs"
 KIND = "integrity"
 EXECUTION = "deterministic"
-RESULT_FORMAT = "livingproof-evaluator-result/1.1.0"
+RESULT_FORMAT = "livingproof-evaluator-result/1.2.0"
 # Subset-legal mark from livingproof-evaluator examples/descriptor/integrity-with-icon.
 ICON = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">'
