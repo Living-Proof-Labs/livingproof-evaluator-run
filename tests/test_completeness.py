@@ -42,7 +42,7 @@ def test_good_fixture_completes_with_a_conforming_result(tmp_path: Path) -> None
     code = _evaluate(GOOD, out)
     assert code == 0
     result = json.loads(out.read_text(encoding="utf-8"))
-    assert result["format"] == "livingproof-evaluator-result/1.1.0"
+    assert result["format"] == "livingproof-evaluator-result/1.2.0"
     assert result["evaluator"]["id"] == "livingproof-run-integrity"
     assert result["evaluator"]["kind"] == "integrity"
     assert result["evaluator"]["display_name"] == "Run Integrity"
@@ -67,7 +67,7 @@ def test_missing_trial_fixture_is_error_and_inconclusive(tmp_path: Path) -> None
     code = _evaluate(MISSING, out)
     assert code == 0
     result = json.loads(out.read_text(encoding="utf-8"))
-    assert result["format"] == "livingproof-evaluator-result/1.1.0"
+    assert result["format"] == "livingproof-evaluator-result/1.2.0"
     run = result["integrity"]["run"]
     assert run["test_system_status"] == "ERROR"
     assert run["conclusion"] == "INCONCLUSIVE"

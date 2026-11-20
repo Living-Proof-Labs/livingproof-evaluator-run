@@ -56,9 +56,9 @@ def _ids(check: dict) -> list[tuple[str, str]]:
 # The contract that is checked out, and the versions we claim.
 
 
-def test_the_contract_is_pinned_at_v1_3_4() -> None:
+def test_the_contract_is_pinned_at_v1_4_0() -> None:
     text = (ROOT / "tools" / "fetch_contract.py").read_text(encoding="utf-8")
-    assert 'TAG = "v1.3.4"' in text
+    assert 'TAG = "v1.4.0"' in text
     assert "v1.1.0" not in text
 
 
@@ -299,7 +299,9 @@ def test_a_manifest_whose_preconditions_were_unmet_is_not_a_completeness_error(
         "findings": [],
     }
     run = document["integrity"]["run"]
-    assert run["test_system_status"] == "COMPLETED" and run["percentage"] == 100
+    # Nothing applied to this run (livingproof-evaluator#38, result format 1.2.0): not graded.
+    assert run["test_system_status"] == "INCONCLUSIVE" and "percentage" not in run
+    assert run["success"] is False and run["conclusion"] == "INCONCLUSIVE"
     assert all(t["test_system_status"] == "COMPLETED" for t in document["integrity"]["trials"])
     assert len(document["integrity"]["trials"]) == 3
     assert base._validate(document) == []

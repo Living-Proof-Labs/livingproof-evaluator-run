@@ -504,16 +504,26 @@ def _write_result(
 ) -> int:
     checks = [report.check for report in reports]
     applicable = [check for check in checks if check["applicable"]]
-    percentage = min((check["percentage"] for check in applicable), default=100)
     success = all(check["success"] for check in checks)
-    run: dict = {
-        "id": run_id,
-        "test_system_status": "COMPLETED" if success else "ERROR",
-        "success": success,
-        "percentage": percentage,
-    }
-    if not success:
-        run["conclusion"] = "INCONCLUSIVE"
+    run: dict
+    if not applicable:
+        # Result format 1.2.0 (livingproof-evaluator#38): no check applied, so nothing was
+        # judged. The run is INCONCLUSIVE, not a pass, and carries no percentage.
+        run = {
+            "id": run_id,
+            "test_system_status": "INCONCLUSIVE",
+            "conclusion": "INCONCLUSIVE",
+            "success": False,
+        }
+    else:
+        run = {
+            "id": run_id,
+            "test_system_status": "COMPLETED" if success else "ERROR",
+            "success": success,
+            "percentage": min(check["percentage"] for check in applicable),
+        }
+        if not success:
+            run["conclusion"] = "INCONCLUSIVE"
     version = package_version()
     descriptor = {
         "title": DISPLAY_NAME,
@@ -553,7 +563,14 @@ def _write_result(
         shown = [*all_shown[:keep], {"text": overflow_note}]
     else:
         shown = all_shown
-    if success:
+    if not applicable:
+        details = "No check applied to this run, so run integrity is not graded."
+        descriptor["details_copy"] = _clip(
+            " ".join(part for part in (details, notes) if part),
+            DESCRIPTOR_LIMITS["details_copy"],
+        )
+        descriptor["findings"] = []
+    elif success:
         # The copy is at most 400 characters. "Stop reasons" notes are dropped first when the
         # card is tight, and preserved in details with a marker on the card, so a
         # "Not checked" note can share it with the pass sentences. A

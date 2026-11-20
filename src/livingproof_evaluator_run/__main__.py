@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         "--out",
         type=Path,
         required=True,
-        help="Path for the livingproof-evaluator-result/1.1.0 document",
+        help="Path for the livingproof-evaluator-result/1.2.0 document",
     )
     parser.add_argument(
         "--media",
