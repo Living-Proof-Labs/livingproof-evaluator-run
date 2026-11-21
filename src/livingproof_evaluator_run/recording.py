@@ -606,14 +606,14 @@ def _add_robot(
             inspection.complete or (inspection.cap_exceeded and version not in ("1.1.0",))
         )
         if found.robot_path is None or not usable:
-            added.append(
-                _finding(
-                    "media-file-mismatch",
-                    "The robot recording is not listed in media.json, is missing, or is not a "
-                    "usable MCAP file.",
-                    trial_id,
-                )
-            )
+            # One category, three causes, each said plainly.
+            if not found.robot_entry.get("path"):
+                why = "The robot recording is not listed in media.json."
+            elif found.robot_path is None:
+                why = "The robot recording media.json lists is missing from the media directory."
+            else:
+                why = "The robot recording is not a usable MCAP file."
+            added.append(_finding("media-file-mismatch", why, trial_id))
             continue
         digest = (results.get(index) or {}).get("sha256")
         recorded = found.robot_entry.get("bytes")
