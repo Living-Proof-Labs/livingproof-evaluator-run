@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 import recordings as rec
+from livingproof_evaluator_run.__main__ import main
+from livingproof_evaluator_run.evaluate import evaluate_evidence
 from test_recording import _check, _categories, _evidence, _media, _run
 
 PREFIX = "livingproof-hallway-media/"
@@ -78,22 +80,55 @@ def test_a_broken_media_json_fails_with_a_declared_gap_limit(content, tmp_path):
     assert document["integrity"]["run"]["success"] is False
 
 
-@pytest.mark.parametrize("content", BROKEN)
-def test_with_no_declared_gap_limit_a_broken_media_json_is_named_in_the_note(content, tmp_path):
-    """The contract lets only an applicable result carry findings (``applicable: false`` requires
-    ``success: true`` and no findings), and an applicable result must carry a ``limits`` that
-    cannot be invented. So with no declared limit this stays not applicable but names the cause.
-    Flagged for Rivet on #41."""
-    check, document = _broken(tmp_path, content, gap=None)
-    assert check["applicable"] is False and check["findings"] == []
-    assert "media.json" in document["descriptor"]["success_copy"]
+def _refused(tmp_path, capsys, content=None, fmt=None):
+    """Run with no declared gap limit; returns (exit status, stderr, result path)."""
+    folder = _evidence(tmp_path, gap=None)
+    media = _media(tmp_path, folder)
+    if content is not None:
+        (media / "media.json").write_text(content, encoding="utf-8")
+    if fmt is not None:
+        rec.edit_media(media, lambda d: d.update(format=fmt))
+    out = tmp_path / "result.json"
+    capsys.readouterr()
+    status = evaluate_evidence(folder / "manifest.json", out, media)
+    return status, capsys.readouterr().err, out
+
+
+# #43: with no gap limit a broken media.json cannot be an applicable finding (no limits to carry),
+# so the evaluator refuses: exit 2, a message on stderr naming the cause, and no result.
+@pytest.mark.parametrize(
+    ("content", "cause"),
+    [
+        ("not json", "not readable"),
+        ("", "not readable"),
+        ("[]", "not readable"),
+        ('{"format": 1}', "no format that is text"),
+        ('{"format": null}', "no format that is text"),
+        ('{"trials": []}', "no format that is text"),
+    ],
+)
+def test_with_no_gap_limit_a_broken_media_json_is_refused_with_exit_2(
+    content, cause, tmp_path, capsys
+):
+    status, err, out = _refused(tmp_path, capsys, content=content)
+    assert status == 2 and not out.exists()
+    assert cause in err and "declares no gap limit" in err and "no result written" in err
 
 
 @pytest.mark.parametrize("version", ["3.0.0", "2.3.0"])
-def test_with_no_declared_gap_limit_an_unknown_version_is_named_in_the_note(version, tmp_path):
-    check, document = _with_format(tmp_path, PREFIX + version, gap=None)
-    assert check["applicable"] is False and check["findings"] == []
-    assert version in document["descriptor"]["success_copy"]
+def test_with_no_gap_limit_an_unknown_version_is_refused_naming_it(version, tmp_path, capsys):
+    status, err, out = _refused(tmp_path, capsys, fmt=PREFIX + version)
+    assert status == 2 and not out.exists()
+    assert PREFIX + version in err and PREFIX + "2.2.0" in err
+
+
+def test_the_command_line_exits_2_and_writes_no_result(tmp_path, capsys):
+    folder = _evidence(tmp_path, gap=None)
+    media = _media(tmp_path, folder)
+    (media / "media.json").write_text("not json", encoding="utf-8")
+    out = tmp_path / "result.json"
+    argv = [str(folder / "manifest.json"), "--out", str(out), "--media", str(media)]
+    assert main(argv) == 2 and not out.exists()
 
 
 def test_the_summary_says_what_is_wrong_with_media_json(tmp_path):

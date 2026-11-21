@@ -232,10 +232,11 @@ check does not know (an unknown minor such as 2.3.0, an unknown major such as 3.
 string). Every trial gets a `media-file-mismatch` finding that says which of the three it is, names
 the format when there is one and lists the versions this check reads, so a recording nobody judged is
 never reported as a pass. Reading a new version is an explicit, tested addition. The result is
-applicable and carries `limits` as usual. With **no declared gap limit** the check stays not applicable,
-and its note names the cause: the contract lets only an applicable result carry findings, and an
-applicable result must carry a limit, which the check never invents. A known version with no declared
-gap limit is not applicable too. A media directory with no `media.json` at all is also not applicable, as it was.
+applicable and carries `limits` as usual. With **no declared gap limit** the contract cannot carry a
+failure (a not applicable result has no findings, and an applicable one needs `limits`, which the check
+never invents), so the evaluator **refuses**: it exits with status 2, prints the cause on stderr
+(`livingproof-evaluator-run: media is refused: ...; no result written`) and writes no result, as for
+a malformed request. A known version with no declared gap limit is not applicable, not refused. A media directory with no `media.json` at all is also not applicable, as it was.
 
 With nothing judged, or no media, the check is not applicable: it reports no percentage and no
 `limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
