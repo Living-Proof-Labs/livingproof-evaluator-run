@@ -237,11 +237,11 @@ everything was judged:
 2.0.0, 2.1.0 and 2.2.0 and nothing else. If the media directory has a `media.json`, the check fails
 when that file cannot be read as a JSON object, has no `format` that is text, names a format this
 check does not know (an unknown minor such as 2.3.0, an unknown major such as 3.0.0, or any other
-string), or has a known format but no `trials` list. Every trial gets a `media-file-mismatch`
-finding that says which of these it is, names the format when there is one and lists the versions
-this check reads, so a recording nobody judged is never reported as a pass. Reading a new version
-is an explicit, tested addition. The result is applicable and carries `limits` as usual. A
-`trials` list that is present but empty is not broken: it says nothing was recorded.
+string), or has a known format but no trials: `trials` missing, not a list, or an empty list, since
+zero trials is broken evidence. Every trial gets a `media-file-mismatch` finding that says which of
+these it is, names the format when there is one and lists the versions this check reads, so a
+recording nobody judged is never reported as a pass. Reading a new version is an explicit, tested
+addition. The result is applicable and carries `limits` as usual.
 
 With **no declared gap limit** the contract cannot carry a failure (a not applicable result has no
 findings, and an applicable one needs `limits`, which the check never invents), so the evaluator
