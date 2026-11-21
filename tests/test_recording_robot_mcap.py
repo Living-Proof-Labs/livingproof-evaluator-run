@@ -154,3 +154,12 @@ def test_the_robot_file_is_not_read_when_the_format_predates_it(tmp_path):
 def test_the_default_clean_run_is_unchanged(tmp_path):
     _, check = _doctored(tmp_path)
     assert check["findings"] == [] and check["percentage"] == 100
+
+
+def test_a_result_with_robot_findings_still_conforms_to_the_contract(tmp_path):
+    import test_completeness as base
+
+    folder, media = _robot(tmp_path, {2: {ESTIMATED: rec.steps(5) + rec.steps(5)}})
+    document = _run(folder, tmp_path, media)
+    assert "timestamps-backwards" in _categories(_check(document))
+    assert base._validate(document) == []
