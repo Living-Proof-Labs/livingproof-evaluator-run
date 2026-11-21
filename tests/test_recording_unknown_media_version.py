@@ -205,10 +205,22 @@ def test_a_known_version_with_no_trials_list_is_refused_with_no_gap_limit(
     assert not out.exists() and "trials" in capsys.readouterr().err
 
 
-def test_an_empty_trials_list_is_still_nothing_recorded_not_a_refusal(tmp_path):
-    folder, media = _without_trials(tmp_path, "2.0.0", [])
+@pytest.mark.parametrize("version", KNOWN)
+def test_an_empty_trials_list_is_refused_like_a_missing_one(version, tmp_path):
+    folder, media = _without_trials(tmp_path, version, [])
     check = _check(_run(folder, tmp_path, media))
-    assert check["findings"] == [] and check["applicable"] is False
+    assert check["applicable"] is True and check["success"] is False
+    assert _categories(check) == ["media-file-mismatch"] * 3
+    assert "trials" in check["findings"][0]["summary"]
+
+
+@pytest.mark.parametrize("version", KNOWN)
+def test_an_empty_trials_list_is_refused_with_no_gap_limit(version, tmp_path, capsys):
+    folder, media = _without_trials(tmp_path, version, [], gap=None)
+    out = tmp_path / "result.json"
+    capsys.readouterr()
+    assert evaluate_evidence(folder / "manifest.json", out, media) == 2
+    assert not out.exists() and "trials" in capsys.readouterr().err
 
 
 # The guard #40 had and #42 dropped (without saying so): at the selectable recording 1.0.0 a broken
