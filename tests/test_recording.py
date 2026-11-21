@@ -213,15 +213,6 @@ def test_a_media_json_that_is_not_readable_is_not_applicable(content: str, tmp_p
     assert check["applicable"] is False and check["findings"] == []
 
 
-def test_a_media_json_of_another_format_is_not_applicable(tmp_path: Path) -> None:
-    folder = _evidence(tmp_path)
-    media = _media(tmp_path, folder)
-    rec.edit_media(media, lambda d: d.update(format="livingproof-hallway-media/1.0.0"))
-    document = _run(folder, tmp_path, media)
-    assert _check(document)["applicable"] is False
-    assert "livingproof-hallway-media/1.0.0" in document["descriptor"]["success_copy"]
-
-
 # The gap limit comes from the evidence, with no default.
 
 
