@@ -656,6 +656,27 @@ def _add_robot(
     outcome.failing = len({item["trial_id"] for item in outcome.findings})
 
 
+def declared_limit(manifest: dict):
+    """The usable gap limit the evidence declares (plan, else the embedded lock's plan), or None."""
+    return usable_limit(_dig(manifest, "plan", RECORDING_ID, "max_gap_seconds")) or usable_limit(
+        _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
+    )
+
+
+def refused_without_limit(manifest: dict, read: MediaRead | None) -> str | None:
+    """Why the evaluator must refuse, or None (#43).
+
+    A ``media.json`` that is unreadable, has no text ``format`` or names an unknown version, with
+    no usable gap limit declared, cannot be reported: a failing result needs a ``limits`` that
+    does not exist, and a not-applicable one cannot carry a finding. So the run is refused (exit
+    2, no result) and the message names the cause. A known version with no limit, and a media
+    directory with no ``media.json``, are not refused.
+    """
+    if read is None or read.refusal is None or declared_limit(manifest) is not None:
+        return None
+    return f"{read.refusal}, and the evidence declares no gap limit"
+
+
 def _refuse_broken_media(
     manifest: dict, read: MediaRead, ids: list[str], version: str
 ) -> Outcome | None:
@@ -669,9 +690,7 @@ def _refuse_broken_media(
     """
     if read.refusal is None or not ids:
         return None
-    limit = usable_limit(_dig(manifest, "plan", RECORDING_ID, "max_gap_seconds")) or usable_limit(
-        _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
-    )
+    limit = declared_limit(manifest)
     if limit is None:
         return None
     findings = [

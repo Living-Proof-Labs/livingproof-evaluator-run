@@ -112,14 +112,14 @@ def test_with_no_gap_limit_a_broken_media_json_is_refused_with_exit_2(
 ):
     status, err, out = _refused(tmp_path, capsys, content=content)
     assert status == 2 and not out.exists()
-    assert cause in err and "no declared gap limit" in err and "no result written" in err
+    assert cause in err and "declares no gap limit" in err and "no result written" in err
 
 
 @pytest.mark.parametrize("version", ["3.0.0", "2.3.0"])
 def test_with_no_gap_limit_an_unknown_version_is_refused_naming_it(version, tmp_path, capsys):
     status, err, out = _refused(tmp_path, capsys, fmt=PREFIX + version)
     assert status == 2 and not out.exists()
-    assert PREFIX + version in err and "2.0.0, 2.1.0, 2.2.0" in err
+    assert PREFIX + version in err and PREFIX + "2.2.0" in err
 
 
 def test_the_command_line_exits_2_and_writes_no_result(tmp_path, capsys):

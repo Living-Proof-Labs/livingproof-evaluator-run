@@ -69,6 +69,14 @@ def evaluate_evidence(manifest_path: Path, out: Path, media: Path | None = None)
         return 2
     results = _results_by_index(manifest)
     read = recording.read_media(media, planned, results)
+    refusal = recording.refused_without_limit(manifest, read)
+    if refusal is not None:
+        # A broken media.json with no gap limit has no result the contract can carry: write none.
+        print(
+            f"livingproof-evaluator-run: media is refused: {refusal}; no result written",
+            file=sys.stderr,
+        )
+        return 2
     findings: list[dict] = []
     trials: list[dict] = []
     inputs = [_input("manifest", manifest_path)]
