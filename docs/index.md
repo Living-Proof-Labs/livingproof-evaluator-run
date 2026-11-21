@@ -225,6 +225,15 @@ everything was judged:
 | `not-present` | `media.json` lists the trial's recording and it is missing, truncated or empty. `completeness` reports it |
 | `not-recorded` | nothing was recorded for the trial: it is not in `media.json` |
 
+**Unknown media versions are refused.** The check reads `livingproof-hallway-media` 2.0.0,
+2.1.0 and 2.2.0 and nothing else. A `media.json` whose `format` is any other string (an unknown
+minor such as 2.3.0 or an unknown major such as 3.0.0) fails the check: every trial gets a
+`media-file-mismatch` finding whose summary names the format and lists the versions this check
+reads, so a recording nobody judged is never reported as a pass. Reading a new version is an
+explicit, tested addition. Two cases stay not applicable: a `media.json` that cannot be read or
+whose `format` is not text, and an unknown format when the evidence declares no usable gap limit
+(an applicable result must carry `limits`); the summary still names the format.
+
 With nothing judged, or no media, the check is not applicable: it reports no percentage and no
 `limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
 its card carries no note about it. A run with media but no usable gap limit is also not

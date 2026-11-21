@@ -518,6 +518,9 @@ class MediaRead:
     it (no readable media.json, another format, no trial list); ``listed`` is by trial index."""
 
     problem: str | None = None
+    # A ``media.json`` whose ``format`` is a string this check does not know. It is refused, not
+    # skipped: every new media version needs an explicit, tested addition (#38).
+    unknown_format: str | None = None
     listed: dict[int, Listed] = field(default_factory=dict)
 
     def state(self, index: int) -> str | None:
@@ -542,7 +545,8 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
     fmt = document.get("format")
     if fmt not in MEDIA_FORMATS:
         return MediaRead(
-            f"media.json is {shown(str(fmt))}, and this check reads {', '.join(MEDIA_FORMATS)}"
+            f"media.json is {shown(str(fmt))}, and this check reads {', '.join(MEDIA_FORMATS)}",
+            unknown_format=fmt if isinstance(fmt, str) else None,
         )
     listing = document.get("trials")
     if not isinstance(listing, list):
@@ -641,6 +645,34 @@ def _add_robot(
     outcome.failing = len({item["trial_id"] for item in outcome.findings})
 
 
+def _refuse_unknown_format(
+    manifest: dict, read: MediaRead, ids: list[str], version: str
+) -> Outcome | None:
+    """A failing result for a media version this check does not know, or None.
+
+    Every trial gets a ``media-file-mismatch`` finding that names the version, so the run does not
+    report success on recordings nobody judged. An applicable result must carry the gap limit (the
+    contract's schema): with none declared this returns None and the not-applicable text names the
+    version instead.
+    """
+    if read.unknown_format is None or version == "1.0.0":
+        return None
+    limit = usable_limit(_dig(manifest, "plan", RECORDING_ID, "max_gap_seconds")) or usable_limit(
+        _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
+    )
+    if limit is None or not ids:
+        return None
+    summary = (
+        f"media.json is format {shown(read.unknown_format)}, which this check does not know; it "
+        f"reads {', '.join(MEDIA_FORMATS)}, so no recording was judged."
+    )
+    findings = [_finding("media-file-mismatch", summary, trial_id) for trial_id in ids]
+    return Outcome(
+        True, findings, len(ids), len(ids), {"max_gap_seconds": limit}, version=version,
+        not_checked=[],
+    )  # fmt: skip
+
+
 def from_evidence(
     manifest: dict,
     media: Path | None,
@@ -662,9 +694,10 @@ def from_evidence(
         # No media directory is not a finding about this run, so it adds no note: a note on every
         # run without media would push a pass sentence off the 400-character card.
         return Outcome(False, version=version, not_checked=None if old else [])
-    if read.problem:
-        return _not_applicable(read.problem, version)
     ids = [f"trial-{index:02d}" for index in range(1, planned + 1) if index in results]
+    if read.problem:
+        refused = _refuse_unknown_format(manifest, read, ids, version)
+        return refused if refused is not None else _not_applicable(read.problem, version)
     # At 1.1.0 a file the reader refused at a cap was truncated, so it is ``not-present``.
     states = {
         f"trial-{i:02d}": "truncated"

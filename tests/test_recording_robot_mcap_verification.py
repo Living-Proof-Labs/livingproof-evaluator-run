@@ -132,15 +132,12 @@ def test_a_trial_whose_sim_file_is_missing_is_left_to_completeness(tmp_path):
 
 
 @pytest.mark.parametrize("version", ["2.3.0", "3.0.0"])
-def test_a_media_format_this_check_does_not_read_is_not_applicable_and_not_a_pass(
-    version, tmp_path
-):
-    """Characterises today's behaviour (the same as 2.1.0 had before #35): not applicable, no
-    percentage, the version named in the result's note; the run itself is not failed by it."""
+def test_a_media_format_this_check_does_not_read_fails_and_names_it(version, tmp_path):
+    """Refused, not skipped (#38): a failing finding that names the format."""
     folder, media = _real(tmp_path, "sim-3.9.0-pub")
     rec.edit_media(media, lambda d: d.update(format=f"livingproof-hallway-media/{version}"))
     document = _run(folder, tmp_path, media)
     check = _check(document)
-    assert check["applicable"] is False and "percentage" not in check
-    assert check["findings"] == []
-    assert f"media.json is livingproof-hallway-media/{version}" in json.dumps(document)
+    assert check["applicable"] is True and check["success"] is False
+    assert {f["category"] for f in check["findings"]} == {"media-file-mismatch"}
+    assert f"livingproof-hallway-media/{version}" in json.dumps(check["findings"])
