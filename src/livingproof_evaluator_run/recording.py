@@ -560,10 +560,10 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
             f"it reads {known}",
         )
     listing = document.get("trials")
-    if not isinstance(listing, list):
+    if not isinstance(listing, list) or not listing:
         return MediaRead(
             "media.json lists no trials",
-            refusal="media.json has no trials list (a known version needs one)",
+            refusal="media.json has no trials, or an empty trials list (a known version needs some)",
         )
     by_index: dict[int, dict] = {}
     for entry in listing:
