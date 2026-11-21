@@ -1,0 +1,16 @@
+{
+  "format": "livingproof-hallway-media/2.1.0",
+  "configuration": "verification-fixture",
+  "run_id": "sim-3.8.1-toy-fixture",
+  "trials": [
+    {
+      "index": 1,
+      "observation_sha256": "c5c074142831dc756945f0b88aa23da2a3fa77835e96b2ef74b95fae68d6dc96",
+      "mcap": {
+        "path": "mcap/trial-01.mcap",
+        "bytes": 7702,
+        "sha256": "d0977440ad4ce9b9af634875e58366042ef10b16eb2736a62f58588f0451756e"
+      }
+    }
+  ]
+}

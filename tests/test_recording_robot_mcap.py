@@ -163,3 +163,17 @@ def test_a_result_with_robot_findings_still_conforms_to_the_contract(tmp_path):
     document = _run(folder, tmp_path, media)
     assert "timestamps-backwards" in _categories(_check(document))
     assert base._validate(document) == []
+
+
+def test_unlisted_missing_and_unusable_robot_files_say_which_it_is(tmp_path):
+    """Three causes, one category, three different summaries."""
+    folder, media = _robot(tmp_path)
+    rec.edit_media(media, lambda d: d["trials"][0].pop("robot_mcap"))  # unlisted
+    (media / "mcap" / "trial-02.robot.mcap").unlink()  # listed, missing
+    rec.truncate(media / "mcap" / "trial-03.robot.mcap", 0.5)  # listed, unusable
+    findings = {f["trial_id"]: f for f in _check_of(tmp_path, folder, media)["findings"]}
+    assert {f["category"] for f in findings.values()} == {"media-file-mismatch"}
+    summaries = [findings[f"trial-0{i}"]["summary"] for i in (1, 2, 3)]
+    assert len(set(summaries)) == 3
+    assert "not listed" in summaries[0] and "missing" in summaries[1]
+    assert "usable" in summaries[2]

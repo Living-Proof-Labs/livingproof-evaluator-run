@@ -1,0 +1,21 @@
+{
+  "format": "livingproof-hallway-media/2.2.0",
+  "configuration": "verification-fixture",
+  "run_id": "sim-3.9.0-pub-fixture",
+  "trials": [
+    {
+      "index": 1,
+      "observation_sha256": "c5c074142831dc756945f0b88aa23da2a3fa77835e96b2ef74b95fae68d6dc96",
+      "mcap": {
+        "path": "mcap/trial-01.mcap",
+        "bytes": 7701,
+        "sha256": "5275a03fe487826374cb2913cbf8f1ec696d86f4e520c4496e056dfa4d49a574"
+      },
+      "robot_mcap": {
+        "path": "mcap/trial-01.robot.mcap",
+        "bytes": 4859,
+        "sha256": "820dcacaa296ce7b4cf164b551004ff64872b97edcfe33a1895efcb7ec4103b2"
+      }
+    }
+  ]
+}
