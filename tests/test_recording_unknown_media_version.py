@@ -7,10 +7,13 @@ names the version, never a silent skip (that is how 2.1.0 went unread).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import recordings as rec
 from livingproof_evaluator_run.__main__ import main
-from livingproof_evaluator_run.evaluate import evaluate_evidence
+from livingproof_evaluator_run import recording
+from livingproof_evaluator_run.evaluate import _planned_count, _results_by_index, evaluate_evidence
 from test_recording import _check, _categories, _evidence, _media, _run
 
 PREFIX = "livingproof-hallway-media/"
@@ -20,7 +23,8 @@ def _with_format(tmp_path, fmt, **kwargs):
     folder = _evidence(tmp_path, **kwargs)
     media = _media(tmp_path, folder)
     rec.edit_media(media, lambda d: d.update(format=fmt))
-    return _check(_run(folder, tmp_path, media)), _run(folder, tmp_path, media)
+    document = _run(folder, tmp_path, media)
+    return _check(document), document
 
 
 @pytest.mark.parametrize("version", ["2.3.0", "2.10.0"], ids=["minor", "double-digit-minor"])
@@ -150,3 +154,72 @@ def test_a_media_directory_with_no_media_json_stays_not_applicable(tmp_path):
     (media / "media.json").unlink()
     check = _check(_run(folder, tmp_path, media))
     assert check["applicable"] is False and check["findings"] == []
+
+
+# A known version with a broken body is refused like any other broken media.json: the docs say a
+# media.json that cannot be judged is an integrity failure, not an opt-out.
+KNOWN = ["2.0.0", "2.1.0", "2.2.0"]
+
+
+def _without_trials(tmp_path, version, how, **kwargs):
+    folder = _evidence(tmp_path, **kwargs)
+    media = _media(tmp_path, folder)
+
+    def edit(doc):
+        doc["format"] = PREFIX + version
+        if how == "missing":
+            doc.pop("trials", None)
+        else:
+            doc["trials"] = how
+
+    rec.edit_media(media, edit)
+    return folder, media
+
+
+BODIES = ["missing", "text", None, 7, {"index": 1}]
+
+
+@pytest.mark.parametrize("how", BODIES, ids=["missing", "text", "null", "number", "object"])
+@pytest.mark.parametrize("version", KNOWN)
+def test_a_known_version_with_no_trials_list_fails_with_a_declared_gap_limit(
+    version, how, tmp_path
+):
+    folder, media = _without_trials(tmp_path, version, how)
+    document = _run(folder, tmp_path, media)
+    check = _check(document)
+    assert check["applicable"] is True and check["success"] is False
+    assert _categories(check) == ["media-file-mismatch"] * 3
+    assert "trials" in check["findings"][0]["summary"]
+    assert document["integrity"]["run"]["success"] is False
+
+
+@pytest.mark.parametrize("how", BODIES, ids=["missing", "text", "null", "number", "object"])
+@pytest.mark.parametrize("version", KNOWN)
+def test_a_known_version_with_no_trials_list_is_refused_with_no_gap_limit(
+    version, how, tmp_path, capsys
+):
+    folder, media = _without_trials(tmp_path, version, how, gap=None)
+    out = tmp_path / "result.json"
+    capsys.readouterr()
+    assert evaluate_evidence(folder / "manifest.json", out, media) == 2
+    assert not out.exists() and "trials" in capsys.readouterr().err
+
+
+def test_an_empty_trials_list_is_still_nothing_recorded_not_a_refusal(tmp_path):
+    folder, media = _without_trials(tmp_path, "2.0.0", [])
+    check = _check(_run(folder, tmp_path, media))
+    assert check["findings"] == [] and check["applicable"] is False
+
+
+# The guard #40 had and #42 dropped (without saying so): at the selectable recording 1.0.0 a broken
+# media.json stays not applicable, as it was before any of this.
+@pytest.mark.parametrize("fmt", [PREFIX + "3.0.0", None, 7])
+def test_recording_1_0_0_does_not_turn_a_broken_media_json_into_findings(fmt, tmp_path):
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    rec.edit_media(media, lambda d: d.update(format=fmt))
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    results = _results_by_index(manifest)
+    outcome = recording.from_evidence(manifest, media, _planned_count(manifest), results, "1.0.0")
+    assert outcome.applicable is False and outcome.findings == []
+    assert outcome.version == "1.0.0" and outcome.not_checked is None
