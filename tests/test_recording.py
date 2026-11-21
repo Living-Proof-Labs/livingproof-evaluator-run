@@ -783,12 +783,13 @@ def test_a_recording_path_that_leaves_the_media_directory_is_not_read(
     assert _completeness(document) == {"trial-01": "missing-recording"}
 
 
-def test_a_media_json_with_a_malformed_trial_list_is_not_applicable(tmp_path: Path) -> None:
+def test_a_media_json_with_a_malformed_trial_list_is_refused(tmp_path: Path) -> None:
     folder = _evidence(tmp_path)
     media = _media(tmp_path, folder)
     rec.edit_media(media, lambda d: d.update(trials="nope"))
     check = _check(_run(folder, tmp_path, media))
-    assert check["applicable"] is False and check["not_checked"] == []
+    assert check["applicable"] is True and check["success"] is False
+    assert _categories(check) == ["media-file-mismatch"] * 3
 
 
 def test_text_from_evidence_is_shown_escaped(tmp_path: Path) -> None:
