@@ -57,18 +57,61 @@ def test_known_versions_behave_as_before(version, tmp_path):
     assert check["applicable"] is True and check["success"] is True and check["findings"] == []
 
 
-@pytest.mark.parametrize("content", ["not json", "[]", "7", '{"format": 1}'])
-def test_an_unreadable_media_json_stays_not_applicable(content, tmp_path):
-    folder = _evidence(tmp_path)
+def _broken(tmp_path, content, **kwargs):
+    folder = _evidence(tmp_path, **kwargs)
     media = _media(tmp_path, folder)
     (media / "media.json").write_text(content, encoding="utf-8")
-    check = _check(_run(folder, tmp_path, media))
+    document = _run(folder, tmp_path, media)
+    return _check(document), document
+
+
+# #41: a media.json that is present but broken is an integrity failure, not an opt-out.
+BROKEN = ["not json", "", "[]", "7", '{"format": 1}', '{"format": null}', '{"trials": []}']
+
+
+@pytest.mark.parametrize("content", BROKEN)
+def test_a_broken_media_json_fails_with_a_declared_gap_limit(content, tmp_path):
+    check, document = _broken(tmp_path, content)
+    assert check["applicable"] is True and check["success"] is False
+    assert _categories(check) == ["media-file-mismatch"] * 3
+    assert "limits" in check and check["percentage"] == 0
+    assert document["integrity"]["run"]["success"] is False
+
+
+@pytest.mark.parametrize("content", BROKEN)
+def test_with_no_declared_gap_limit_a_broken_media_json_is_named_in_the_note(content, tmp_path):
+    """The contract lets only an applicable result carry findings (``applicable: false`` requires
+    ``success: true`` and no findings), and an applicable result must carry a ``limits`` that
+    cannot be invented. So with no declared limit this stays not applicable but names the cause.
+    Flagged for Rivet on #41."""
+    check, document = _broken(tmp_path, content, gap=None)
+    assert check["applicable"] is False and check["findings"] == []
+    assert "media.json" in document["descriptor"]["success_copy"]
+
+
+@pytest.mark.parametrize("version", ["3.0.0", "2.3.0"])
+def test_with_no_declared_gap_limit_an_unknown_version_is_named_in_the_note(version, tmp_path):
+    check, document = _with_format(tmp_path, PREFIX + version, gap=None)
+    assert check["applicable"] is False and check["findings"] == []
+    assert version in document["descriptor"]["success_copy"]
+
+
+def test_the_summary_says_what_is_wrong_with_media_json(tmp_path):
+    unreadable, _ = _broken(tmp_path / "a", "not json")
+    not_text, _ = _broken(tmp_path / "b", '{"format": 1}')
+    assert "readable" in unreadable["findings"][0]["summary"]
+    assert "text" in not_text["findings"][0]["summary"]
+
+
+@pytest.mark.parametrize("version", ["2.0.0", "2.1.0"])
+def test_a_known_version_with_no_declared_gap_limit_stays_not_applicable(version, tmp_path):
+    check, _ = _with_format(tmp_path, PREFIX + version, gap=None)
     assert check["applicable"] is False and check["findings"] == []
 
 
-def test_with_no_declared_gap_limit_the_check_still_cannot_report_a_finding(tmp_path):
-    """An applicable result must carry the limit (the contract's schema), so with none declared
-    the unknown version is only named in the not-applicable text. Flagged for Rivet."""
-    check, document = _with_format(tmp_path, PREFIX + "3.0.0", gap=None)
-    assert check["applicable"] is False
-    assert "3.0.0" in document["descriptor"]["success_copy"]
+def test_a_media_directory_with_no_media_json_stays_not_applicable(tmp_path):
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    (media / "media.json").unlink()
+    check = _check(_run(folder, tmp_path, media))
+    assert check["applicable"] is False and check["findings"] == []

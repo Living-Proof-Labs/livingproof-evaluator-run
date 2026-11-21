@@ -204,15 +204,6 @@ def test_a_media_directory_without_media_json_is_not_applicable(tmp_path: Path) 
     assert check["applicable"] is False and check["findings"] == []
 
 
-@pytest.mark.parametrize("content", ["not json", "[]", "7", '{"format": 1}'])
-def test_a_media_json_that_is_not_readable_is_not_applicable(content: str, tmp_path: Path) -> None:
-    folder = _evidence(tmp_path)
-    media = _media(tmp_path, folder)
-    (media / "media.json").write_text(content, encoding="utf-8")
-    check = _check(_run(folder, tmp_path, media))
-    assert check["applicable"] is False and check["findings"] == []
-
-
 # The gap limit comes from the evidence, with no default.
 
 
