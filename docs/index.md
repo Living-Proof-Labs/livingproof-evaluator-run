@@ -225,14 +225,17 @@ everything was judged:
 | `not-present` | `media.json` lists the trial's recording and it is missing, truncated or empty. `completeness` reports it |
 | `not-recorded` | nothing was recorded for the trial: it is not in `media.json` |
 
-**Unknown media versions are refused.** The check reads `livingproof-hallway-media` 2.0.0,
-2.1.0 and 2.2.0 and nothing else. A `media.json` whose `format` is any other string (an unknown
-minor such as 2.3.0 or an unknown major such as 3.0.0) fails the check: every trial gets a
-`media-file-mismatch` finding whose summary names the format and lists the versions this check
-reads, so a recording nobody judged is never reported as a pass. Reading a new version is an
-explicit, tested addition. Two cases stay not applicable: a `media.json` that cannot be read or
-whose `format` is not text, and an unknown format when the evidence declares no usable gap limit
-(an applicable result must carry `limits`); the summary still names the format.
+**A broken media file is refused, not skipped.** The check reads `livingproof-hallway-media`
+2.0.0, 2.1.0 and 2.2.0 and nothing else. If the media directory has a `media.json`, the check fails
+when that file cannot be read as a JSON object, has no `format` that is text, or names a format this
+check does not know (an unknown minor such as 2.3.0, an unknown major such as 3.0.0, or any other
+string). Every trial gets a `media-file-mismatch` finding that says which of the three it is, names
+the format when there is one and lists the versions this check reads, so a recording nobody judged is
+never reported as a pass. Reading a new version is an explicit, tested addition. The result is
+applicable and carries `limits` as usual. With **no declared gap limit** the check stays not applicable,
+and its note names the cause: the contract lets only an applicable result carry findings, and an
+applicable result must carry a limit, which the check never invents. A known version with no declared
+gap limit is not applicable too. A media directory with no `media.json` at all is also not applicable, as it was.
 
 With nothing judged, or no media, the check is not applicable: it reports no percentage and no
 `limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
