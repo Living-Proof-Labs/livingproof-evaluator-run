@@ -518,9 +518,10 @@ class MediaRead:
     it (no readable media.json, another format, no trial list); ``listed`` is by trial index."""
 
     problem: str | None = None
-    # A ``media.json`` whose ``format`` is a string this check does not know. It is refused, not
-    # skipped: every new media version needs an explicit, tested addition (#38).
-    unknown_format: str | None = None
+    # Why a ``media.json`` that is present is refused (#38, #41): unreadable, no text ``format``,
+    # or a format this check does not know. A broken media file is an integrity failure, not an
+    # opt-out, so it is reported as a finding and is not skipped.
+    refusal: str | None = None
     listed: dict[int, Listed] = field(default_factory=dict)
 
     def state(self, index: int) -> str | None:
@@ -541,12 +542,22 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
     media = Path(media)
     document = _read_json(media / "media.json")
     if not isinstance(document, dict):
-        return MediaRead("there is no readable media.json in the media directory")
+        problem = "there is no readable media.json in the media directory"
+        if (media / "media.json").exists():
+            return MediaRead(problem, refusal="media.json is not readable as a JSON object")
+        return MediaRead(problem)
     fmt = document.get("format")
+    known = ", ".join(MEDIA_FORMATS)
+    if not isinstance(fmt, str):
+        return MediaRead(
+            f"media.json has no format that is text, and this check reads {known}",
+            refusal=f"media.json has no format that is text; this check reads {known}",
+        )
     if fmt not in MEDIA_FORMATS:
         return MediaRead(
-            f"media.json is {shown(str(fmt))}, and this check reads {', '.join(MEDIA_FORMATS)}",
-            unknown_format=fmt if isinstance(fmt, str) else None,
+            f"media.json is {shown(str(fmt))}, and this check reads {known}",
+            refusal=f"media.json is format {shown(fmt)}, which this check does not know; "
+            f"it reads {known}",
         )
     listing = document.get("trials")
     if not isinstance(listing, list):
@@ -645,32 +656,37 @@ def _add_robot(
     outcome.failing = len({item["trial_id"] for item in outcome.findings})
 
 
-def _refuse_unknown_format(
+def _refuse_broken_media(
     manifest: dict, read: MediaRead, ids: list[str], version: str
 ) -> Outcome | None:
-    """A failing result for a media version this check does not know, or None.
+    """A failing result for a ``media.json`` that is present but unusable, or None.
 
-    Every trial gets a ``media-file-mismatch`` finding that names the version, so the run does not
-    report success on recordings nobody judged. An applicable result must carry the gap limit (the
-    contract's schema): with none declared this returns None and the not-applicable text names the
-    version instead.
+    Every trial gets a ``media-file-mismatch`` finding, so the run never reports success on
+    recordings nobody judged. The result is applicable and carries the declared gap limit. With
+    none declared this returns None and the not-applicable text names the cause: the contract
+    lets only an applicable result carry findings (``applicable: false`` needs ``success: true``
+    and no findings) and an applicable result needs a ``limits`` that cannot be invented (#41).
     """
-    if read.unknown_format is None or version == "1.0.0":
+    if read.refusal is None or not ids:
         return None
     limit = usable_limit(_dig(manifest, "plan", RECORDING_ID, "max_gap_seconds")) or usable_limit(
         _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
     )
-    if limit is None or not ids:
+    if limit is None:
         return None
-    summary = (
-        f"media.json is format {shown(read.unknown_format)}, which this check does not know; it "
-        f"reads {', '.join(MEDIA_FORMATS)}, so no recording was judged."
-    )
-    findings = [_finding("media-file-mismatch", summary, trial_id) for trial_id in ids]
+    findings = [
+        _finding("media-file-mismatch", f"{read.refusal}, so no recording was judged.", trial_id)
+        for trial_id in ids
+    ]
     return Outcome(
-        True, findings, len(ids), len(ids), {"max_gap_seconds": limit}, version=version,
-        not_checked=[],
-    )  # fmt: skip
+        True,
+        findings,
+        len(ids),
+        len(ids),
+        {"max_gap_seconds": limit},
+        version=version,
+        not_checked=None if version == "1.0.0" else [],
+    )
 
 
 def from_evidence(
@@ -696,7 +712,7 @@ def from_evidence(
         return Outcome(False, version=version, not_checked=None if old else [])
     ids = [f"trial-{index:02d}" for index in range(1, planned + 1) if index in results]
     if read.problem:
-        refused = _refuse_unknown_format(manifest, read, ids, version)
+        refused = _refuse_broken_media(manifest, read, ids, version)
         return refused if refused is not None else _not_applicable(read.problem, version)
     # At 1.1.0 a file the reader refused at a cap was truncated, so it is ``not-present``.
     states = {
