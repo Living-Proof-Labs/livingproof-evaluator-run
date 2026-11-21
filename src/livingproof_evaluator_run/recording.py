@@ -33,7 +33,8 @@ says so. They are the two channels livingproof-sim-mujoco's media job always wri
 
 Where the evidence comes from:
 
-* ``mcap/trial-NN.mcap`` and ``media.json`` (``livingproof-hallway-media/2.0.0``) are written by
+* ``mcap/trial-NN.mcap`` and ``media.json`` (``livingproof-hallway-media/2.0.0``, 2.1.0 or 2.2.0;
+  2.2.0 adds ``mcap/trial-NN.robot.mcap``, judged too, see ``_add_robot``) are written by
   livingproof-sim-mujoco's ``media`` module in capability-verifier's ``media`` job and uploaded as
   the artifact ``<prefix>mcap-<configuration>``. The evidence manifest records neither, so on a
   manifest the media directory is a separate input (``--media DIR``). Without one there is no
@@ -94,6 +95,14 @@ _OVER_LIMIT_UNITS = {
 # always writes (``/base_pose`` and ``/joint_states``). Versioned with this check.
 DEFAULT_REQUIRED_CHANNELS = ("/base_pose", "/joint_states")
 MEDIA_FORMAT = "livingproof-hallway-media/2.0.0"
+# 2.1.0 adds a per-trial binding file and 2.2.0 a per-trial ``robot_mcap``; both are additive, so
+# the 2.0.0 fields are read the same way. Only 2.2.0 lists a robot recording to judge.
+MEDIA_FORMATS = (
+    MEDIA_FORMAT,
+    "livingproof-hallway-media/2.1.0",
+    "livingproof-hallway-media/2.2.0",
+)
+ROBOT_FORMAT = MEDIA_FORMATS[-1]
 _TOPIC = re.compile(r"^/.+")
 _LISTED = 5
 
@@ -494,6 +503,13 @@ class Listed:
     mcap: dict
     path: Path | None = None
     inspection: mcap_reader.Inspection | None = None
+    # The robot recording (2.2.0 only): its listing, file and reading. ``robot`` is False for an
+    # earlier format, which lists none; a 2.2.0 entry that lists none or a file that is not there
+    # has ``robot`` True and no ``robot_path``.
+    robot: bool = False
+    robot_entry: dict = field(default_factory=dict)
+    robot_path: Path | None = None
+    robot_inspection: mcap_reader.Inspection | None = None
 
 
 @dataclass
@@ -524,8 +540,10 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
     if not isinstance(document, dict):
         return MediaRead("there is no readable media.json in the media directory")
     fmt = document.get("format")
-    if fmt != MEDIA_FORMAT:
-        return MediaRead(f"media.json is {shown(str(fmt))}, and this check reads {MEDIA_FORMAT}")
+    if fmt not in MEDIA_FORMATS:
+        return MediaRead(
+            f"media.json is {shown(str(fmt))}, and this check reads {', '.join(MEDIA_FORMATS)}"
+        )
     listing = document.get("trials")
     if not isinstance(listing, list):
         return MediaRead("media.json lists no trials")
@@ -551,7 +569,76 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
             # reported as ``recording-over-limit``, not as truncation.
             state = "present" if inspection.complete or inspection.cap_exceeded else "truncated"
             read.listed[index] = Listed(index, state, entry, mcap, path, inspection)
+        if fmt == ROBOT_FORMAT:
+            found = read.listed[index]
+            found.robot = True
+            robot = entry.get("robot_mcap")
+            found.robot_entry = robot if isinstance(robot, dict) else {}
+            found.robot_path = _file(media, found.robot_entry.get("path"))
+            if found.robot_path is not None and found.robot_path.stat().st_size > 0:
+                found.robot_inspection = mcap_reader.inspect(found.robot_path)
     return read
+
+
+def _add_robot(
+    outcome: Outcome,
+    read: MediaRead,
+    limit: float,
+    results: dict[int, dict],
+    judged: set[str],
+    version: str,
+) -> None:
+    """Judge the robot recording of each judged trial that media 2.2.0 lists one for.
+
+    The robot file gets the same structure, timestamp, gap and media.json size and sha256 rules as
+    the sim file, but no required channel: a robot that publishes nothing has an empty file. Its
+    observation link is the sim file's, so it is not compared again. A listing that is absent, a
+    file that is not there, empty or not a usable MCAP is ``media-file-mismatch``. A trial with a
+    finding in either file fails, and stays one judged trial.
+    """
+    added: list[dict] = []
+    for index, found in sorted(read.listed.items()):
+        trial_id = f"trial-{index:02d}"
+        if not found.robot or trial_id not in judged:
+            continue
+        inspection = found.robot_inspection
+        usable = inspection is not None and (
+            inspection.complete or (inspection.cap_exceeded and version not in ("1.1.0",))
+        )
+        if found.robot_path is None or not usable:
+            added.append(
+                _finding(
+                    "media-file-mismatch",
+                    "The robot recording is not listed in media.json, is missing, or is not a "
+                    "usable MCAP file.",
+                    trial_id,
+                )
+            )
+            continue
+        digest = (results.get(index) or {}).get("sha256")
+        recorded = found.robot_entry.get("bytes")
+        mine = Trial(
+            id=trial_id,
+            complete=inspection.complete,
+            cap_exceeded=inspection.cap_exceeded,
+            over_limit=inspection.over_limit,
+            bytes=found.robot_path.stat().st_size,
+            sha256=_digest(found.robot_path),
+            channels=[
+                Channel(c.topic, c.message_count, c.backward_steps, c.max_gap_seconds)
+                for c in inspection.channels
+            ],
+            media_bytes=recorded if _number(recorded) else None,
+            media_sha256=found.robot_entry.get("sha256"),
+            media_observation_sha256=digest,
+            evidence_observation_sha256=digest,
+        )
+        for finding in judge([], limit, [mine], version).findings:
+            added.append({**finding, "summary": f"Robot recording: {finding['summary']}"})
+    if not added:
+        return
+    outcome.findings = sorted(outcome.findings + added, key=lambda item: item["trial_id"])
+    outcome.failing = len({item["trial_id"] for item in outcome.findings})
 
 
 def from_evidence(
@@ -651,6 +738,8 @@ def from_evidence(
     if old and skipped:
         notes.append(f"Not checked: recording of {listed_ids(skipped)} (no file to read).")
     outcome = judge(channels, limit, trials, version, truncation_once=old)
+    if outcome.applicable and not old:
+        _add_robot(outcome, read, limit, results, {t.id for t in trials}, version)
     if not outcome.applicable:
         return _not_applicable(
             "no recording file is present to judge",

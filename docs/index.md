@@ -177,8 +177,9 @@ generated cases.
 **Where the recordings come from.** livingproof-sim-mujoco's `media` module writes
 `mcap/trial-NN.mcap` for every trial and `media.json`
 (`livingproof-hallway-media/2.0.0`: `trials[].index`, `observation_sha256` and
-`mcap.{path,bytes,sha256}`) in capability-verifier's optional `media` job, which uploads them as
-the artifact `<prefix>mcap-<configuration>`. The evidence manifest records neither, so the
+`mcap.{path,bytes,sha256}`; 2.1.0 and 2.2.0 are read the same way) in capability-verifier's optional `media` job, which uploads them as
+the artifact `<prefix>mcap-<configuration>`. From `media.json` 2.2.0 each trial also lists a
+`robot_mcap` (`mcap/trial-NN.robot.mcap`, what the robot adapter published). The check judges it too for structure, timestamps, the gap limit and its size and sha256, but requires no channel in it; a missing or unusable robot file is `media-file-mismatch`, and a trial with a finding in either file fails. The evidence manifest records neither, so the
 evaluator takes the artifact's directory as `--media DIR`. The runner re-runs each trial for its
 recording and keeps the file only if the observation hashes to the evidence's digest, which is why
 `observation_sha256` is the link back to `trials.results[].sha256`.
