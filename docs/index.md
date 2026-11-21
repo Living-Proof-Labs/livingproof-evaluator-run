@@ -205,13 +205,6 @@ declares none and there is no default: the check never assumes one. All ten lock
 livingproof-verification (the `lpv` locks) declare `plan.recording.max_gap_seconds` as `0.05` s, so
 a run on one of them has a limit; a run whose evidence declares none does not. The `0.1` s in the
 contract's examples is a proposal that has not been approved, and nothing here uses it.
-**The gap limit.** It comes from the evidence and from nowhere else. A gap equal to the limit is
-not a finding; only a larger one is. When the check is applicable its `limits.max_gap_seconds` is
-exactly the evidence's value. A value that is not a finite number above zero is not used. With no
-usable limit the check is not applicable even when media is present, and the summary says that
-it declares none and there is no default: the check never assumes one. No plan declares a limit
-today. The `0.1` s in the contract's examples is a proposal that has not been approved, and
-nothing here uses it.
 
 | Category | When |
 | --- | --- |
