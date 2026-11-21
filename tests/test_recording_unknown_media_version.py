@@ -289,3 +289,13 @@ def test_the_1_0_0_guard_is_only_for_1_0_0_later_selectable_rules_still_refuse(v
     )
     assert outcome.applicable is True and outcome.version == version
     assert [f["category"] for f in outcome.findings] == ["media-file-mismatch"] * 3
+
+
+def test_an_empty_trials_list_at_1_0_0_stays_not_applicable(tmp_path):
+    """The empty-list refusal follows the 1.0.0 guard: the first rule never refuses (PR 45)."""
+    folder, media = _without_trials(tmp_path, "2.2.0", [])
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    outcome = recording.from_evidence(
+        manifest, media, _planned_count(manifest), _results_by_index(manifest), "1.0.0"
+    )
+    assert outcome.applicable is False and outcome.findings == []
