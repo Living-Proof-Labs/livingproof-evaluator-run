@@ -560,8 +560,11 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
             f"it reads {known}",
         )
     listing = document.get("trials")
-    if not isinstance(listing, list):
-        return MediaRead("media.json lists no trials")
+    if not isinstance(listing, list) or not listing:
+        return MediaRead(
+            "media.json lists no trials",
+            refusal="media.json has no trials, or an empty trials list (a known version needs some)",
+        )
     by_index: dict[int, dict] = {}
     for entry in listing:
         index = entry.get("index") if isinstance(entry, dict) else None
@@ -688,7 +691,8 @@ def _refuse_broken_media(
     lets only an applicable result carry findings (``applicable: false`` needs ``success: true``
     and no findings) and an applicable result needs a ``limits`` that cannot be invented (#41).
     """
-    if read.refusal is None or not ids:
+    if read.refusal is None or not ids or version == "1.0.0":
+        # Recording 1.0.0 is the selectable first rule: a broken media.json stays not applicable.
         return None
     limit = declared_limit(manifest)
     if limit is None:
