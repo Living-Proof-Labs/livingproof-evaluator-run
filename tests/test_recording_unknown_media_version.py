@@ -235,3 +235,57 @@ def test_recording_1_0_0_does_not_turn_a_broken_media_json_into_findings(fmt, tm
     outcome = recording.from_evidence(manifest, media, _planned_count(manifest), results, "1.0.0")
     assert outcome.applicable is False and outcome.findings == []
     assert outcome.version == "1.0.0" and outcome.not_checked is None
+
+
+# Vera, PR 45: the restored 1.0.0 guard, checked against the contract's schema instead of by hand.
+# A 1.0.0 rule result for a broken media.json is a valid recording check (not applicable, no
+# findings, no ``limits`` and no ``not_checked``), and a mutation that refuses at 1.0.0 is caught.
+def _broken_1_0_0(tmp_path, change):
+    from livingproof_evaluator_run.evaluate import _recording
+
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    change(media)
+    document = _run(folder, tmp_path, None)  # a passing run: only the recording check is swapped
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    outcome = recording.from_evidence(
+        manifest, media, _planned_count(manifest), _results_by_index(manifest), "1.0.0"
+    )
+    check = _recording(outcome).check
+    document["integrity"]["checks"] = [
+        check if c["id"] == check["id"] else c for c in document["integrity"]["checks"]
+    ]
+    return document, check
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda m: rec.edit_media(m, lambda d: d.update(format=PREFIX + "3.0.0")),
+        lambda m: rec.edit_media(m, lambda d: d.update(format=PREFIX + "2.2.0", trials="nope")),
+        lambda m: rec.edit_media(m, lambda d: d.update(format=7)),
+        lambda m: (m / "media.json").write_text("not json", encoding="utf-8"),
+    ],
+    ids=["unknown-major", "known-no-trials", "format-int", "unreadable"],
+)
+def test_a_1_0_0_result_for_a_broken_media_json_conforms_to_the_contract(change, tmp_path):
+    from test_completeness import _validate
+
+    document, check = _broken_1_0_0(tmp_path, change)
+    assert check["version"] == "1.0.0" and check["applicable"] is False
+    assert check["findings"] == [] and "limits" not in check and "not_checked" not in check
+    assert _validate(document) == []
+
+
+@pytest.mark.parametrize("version", ["1.1.0", "1.2.0"])
+def test_the_1_0_0_guard_is_only_for_1_0_0_later_selectable_rules_still_refuse(version, tmp_path):
+    """Mutation in the PR 45 review: widening the guard to every version but 1.2.0 passed."""
+    folder = _evidence(tmp_path)
+    media = _media(tmp_path, folder)
+    rec.edit_media(media, lambda d: d.update(format=PREFIX + "3.0.0"))
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    outcome = recording.from_evidence(
+        manifest, media, _planned_count(manifest), _results_by_index(manifest), version
+    )
+    assert outcome.applicable is True and outcome.version == version
+    assert [f["category"] for f in outcome.findings] == ["media-file-mismatch"] * 3
