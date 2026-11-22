@@ -72,12 +72,47 @@ jobs:
           PY
           tar --dereference --hard-dereference -C site -cf "$RUNNER_TEMP/artifact.tar" .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: pages-artifact
         if: steps.freshness.outputs.current == 'true'
         with:
-          name: github-pages
+          name: github-pages-${{ github.run_attempt }}
           path: ${{ runner.temp }}/artifact.tar
           retention-days: 1
           if-no-files-found: error
+      - name: Wait for Pages artifact visibility
+        if: steps.freshness.outputs.current == 'true'
+        env:
+          ARTIFACT_ID: ${{ steps.pages-artifact.outputs.artifact-id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os, time, urllib.error, urllib.request
+          artifact_id = os.environ['ARTIFACT_ID']
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GITHUB_TOKEN']
+          url = f'https://api.github.com/repos/{repo}/actions/artifacts/{artifact_id}'
+          for delay in (1, 2, 4, 8, 15, 0):
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      if resp.status == 200:
+                          break
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404 or delay == 0:
+                      raise
+              time.sleep(delay)
+          else:
+              raise SystemExit(f'Pages artifact {artifact_id} did not become visible in time')
+          PY
       - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
         if: steps.freshness.outputs.current == 'true'
         id: deployment
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
