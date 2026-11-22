@@ -33,7 +33,8 @@ says so. They are the two channels livingproof-sim-mujoco's media job always wri
 
 Where the evidence comes from:
 
-* ``mcap/trial-NN.mcap`` and ``media.json`` (``livingproof-hallway-media/2.0.0``) are written by
+* ``mcap/trial-NN.mcap`` and ``media.json`` (``livingproof-hallway-media/2.0.0``, 2.1.0 or 2.2.0;
+  2.2.0 adds ``mcap/trial-NN.robot.mcap``, judged too, see ``_add_robot``) are written by
   livingproof-sim-mujoco's ``media`` module in capability-verifier's ``media`` job and uploaded as
   the artifact ``<prefix>mcap-<configuration>``. The evidence manifest records neither, so on a
   manifest the media directory is a separate input (``--media DIR``). Without one there is no
@@ -94,6 +95,14 @@ _OVER_LIMIT_UNITS = {
 # always writes (``/base_pose`` and ``/joint_states``). Versioned with this check.
 DEFAULT_REQUIRED_CHANNELS = ("/base_pose", "/joint_states")
 MEDIA_FORMAT = "livingproof-hallway-media/2.0.0"
+# 2.1.0 adds a per-trial binding file and 2.2.0 a per-trial ``robot_mcap``; both are additive, so
+# the 2.0.0 fields are read the same way. Only 2.2.0 lists a robot recording to judge.
+MEDIA_FORMATS = (
+    MEDIA_FORMAT,
+    "livingproof-hallway-media/2.1.0",
+    "livingproof-hallway-media/2.2.0",
+)
+ROBOT_FORMAT = MEDIA_FORMATS[-1]
 _TOPIC = re.compile(r"^/.+")
 _LISTED = 5
 
@@ -494,6 +503,13 @@ class Listed:
     mcap: dict
     path: Path | None = None
     inspection: mcap_reader.Inspection | None = None
+    # The robot recording (2.2.0 only): its listing, file and reading. ``robot`` is False for an
+    # earlier format, which lists none; a 2.2.0 entry that lists none or a file that is not there
+    # has ``robot`` True and no ``robot_path``.
+    robot: bool = False
+    robot_entry: dict = field(default_factory=dict)
+    robot_path: Path | None = None
+    robot_inspection: mcap_reader.Inspection | None = None
 
 
 @dataclass
@@ -502,6 +518,10 @@ class MediaRead:
     it (no readable media.json, another format, no trial list); ``listed`` is by trial index."""
 
     problem: str | None = None
+    # Why a ``media.json`` that is present is refused (#38, #41): unreadable, no text ``format``,
+    # or a format this check does not know. A broken media file is an integrity failure, not an
+    # opt-out, so it is reported as a finding and is not skipped.
+    refusal: str | None = None
     listed: dict[int, Listed] = field(default_factory=dict)
 
     def state(self, index: int) -> str | None:
@@ -522,13 +542,29 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
     media = Path(media)
     document = _read_json(media / "media.json")
     if not isinstance(document, dict):
-        return MediaRead("there is no readable media.json in the media directory")
+        problem = "there is no readable media.json in the media directory"
+        if (media / "media.json").exists():
+            return MediaRead(problem, refusal="media.json is not readable as a JSON object")
+        return MediaRead(problem)
     fmt = document.get("format")
-    if fmt != MEDIA_FORMAT:
-        return MediaRead(f"media.json is {shown(str(fmt))}, and this check reads {MEDIA_FORMAT}")
+    known = ", ".join(MEDIA_FORMATS)
+    if not isinstance(fmt, str):
+        return MediaRead(
+            f"media.json has no format that is text, and this check reads {known}",
+            refusal=f"media.json has no format that is text; this check reads {known}",
+        )
+    if fmt not in MEDIA_FORMATS:
+        return MediaRead(
+            f"media.json is {shown(str(fmt))}, and this check reads {known}",
+            refusal=f"media.json is format {shown(fmt)}, which this check does not know; "
+            f"it reads {known}",
+        )
     listing = document.get("trials")
-    if not isinstance(listing, list):
-        return MediaRead("media.json lists no trials")
+    if not isinstance(listing, list) or not listing:
+        return MediaRead(
+            "media.json lists no trials",
+            refusal="media.json has no trials, or an empty trials list (a known version needs some)",
+        )
     by_index: dict[int, dict] = {}
     for entry in listing:
         index = entry.get("index") if isinstance(entry, dict) else None
@@ -551,7 +587,129 @@ def read_media(media: Path | None, planned: int, results: dict[int, dict]) -> Me
             # reported as ``recording-over-limit``, not as truncation.
             state = "present" if inspection.complete or inspection.cap_exceeded else "truncated"
             read.listed[index] = Listed(index, state, entry, mcap, path, inspection)
+        if fmt == ROBOT_FORMAT:
+            found = read.listed[index]
+            found.robot = True
+            robot = entry.get("robot_mcap")
+            found.robot_entry = robot if isinstance(robot, dict) else {}
+            found.robot_path = _file(media, found.robot_entry.get("path"))
+            if found.robot_path is not None and found.robot_path.stat().st_size > 0:
+                found.robot_inspection = mcap_reader.inspect(found.robot_path)
     return read
+
+
+def _add_robot(
+    outcome: Outcome,
+    read: MediaRead,
+    limit: float,
+    results: dict[int, dict],
+    judged: set[str],
+    version: str,
+) -> None:
+    """Judge the robot recording of each judged trial that media 2.2.0 lists one for.
+
+    The robot file gets the same structure, timestamp, gap and media.json size and sha256 rules as
+    the sim file, but no required channel: a robot that publishes nothing has an empty file. Its
+    observation link is the sim file's, so it is not compared again. A listing that is absent, a
+    file that is not there, empty or not a usable MCAP is ``media-file-mismatch``. A trial with a
+    finding in either file fails, and stays one judged trial.
+    """
+    added: list[dict] = []
+    for index, found in sorted(read.listed.items()):
+        trial_id = f"trial-{index:02d}"
+        if not found.robot or trial_id not in judged:
+            continue
+        inspection = found.robot_inspection
+        usable = inspection is not None and (
+            inspection.complete or (inspection.cap_exceeded and version not in ("1.1.0",))
+        )
+        if found.robot_path is None or not usable:
+            # One category, three causes, each said plainly.
+            if not found.robot_entry.get("path"):
+                why = "The robot recording is not listed in media.json."
+            elif found.robot_path is None:
+                why = "The robot recording media.json lists is missing from the media directory."
+            else:
+                why = "The robot recording is not a usable MCAP file."
+            added.append(_finding("media-file-mismatch", why, trial_id))
+            continue
+        digest = (results.get(index) or {}).get("sha256")
+        recorded = found.robot_entry.get("bytes")
+        mine = Trial(
+            id=trial_id,
+            complete=inspection.complete,
+            cap_exceeded=inspection.cap_exceeded,
+            over_limit=inspection.over_limit,
+            bytes=found.robot_path.stat().st_size,
+            sha256=_digest(found.robot_path),
+            channels=[
+                Channel(c.topic, c.message_count, c.backward_steps, c.max_gap_seconds)
+                for c in inspection.channels
+            ],
+            media_bytes=recorded if _number(recorded) else None,
+            media_sha256=found.robot_entry.get("sha256"),
+            media_observation_sha256=digest,
+            evidence_observation_sha256=digest,
+        )
+        for finding in judge([], limit, [mine], version).findings:
+            added.append({**finding, "summary": f"Robot recording: {finding['summary']}"})
+    if not added:
+        return
+    outcome.findings = sorted(outcome.findings + added, key=lambda item: item["trial_id"])
+    outcome.failing = len({item["trial_id"] for item in outcome.findings})
+
+
+def declared_limit(manifest: dict):
+    """The usable gap limit the evidence declares (plan, else the embedded lock's plan), or None."""
+    return usable_limit(_dig(manifest, "plan", RECORDING_ID, "max_gap_seconds")) or usable_limit(
+        _dig(manifest, "lock", "content", "plan", RECORDING_ID, "max_gap_seconds")
+    )
+
+
+def refused_without_limit(manifest: dict, read: MediaRead | None) -> str | None:
+    """Why the evaluator must refuse, or None (#43).
+
+    A ``media.json`` that is unreadable, has no text ``format`` or names an unknown version, with
+    no usable gap limit declared, cannot be reported: a failing result needs a ``limits`` that
+    does not exist, and a not-applicable one cannot carry a finding. So the run is refused (exit
+    2, no result) and the message names the cause. A known version with no limit, and a media
+    directory with no ``media.json``, are not refused.
+    """
+    if read is None or read.refusal is None or declared_limit(manifest) is not None:
+        return None
+    return f"{read.refusal}, and the evidence declares no gap limit"
+
+
+def _refuse_broken_media(
+    manifest: dict, read: MediaRead, ids: list[str], version: str
+) -> Outcome | None:
+    """A failing result for a ``media.json`` that is present but unusable, or None.
+
+    Every trial gets a ``media-file-mismatch`` finding, so the run never reports success on
+    recordings nobody judged. The result is applicable and carries the declared gap limit. With
+    none declared this returns None and the not-applicable text names the cause: the contract
+    lets only an applicable result carry findings (``applicable: false`` needs ``success: true``
+    and no findings) and an applicable result needs a ``limits`` that cannot be invented (#41).
+    """
+    if read.refusal is None or not ids or version == "1.0.0":
+        # Recording 1.0.0 is the selectable first rule: a broken media.json stays not applicable.
+        return None
+    limit = declared_limit(manifest)
+    if limit is None:
+        return None
+    findings = [
+        _finding("media-file-mismatch", f"{read.refusal}, so no recording was judged.", trial_id)
+        for trial_id in ids
+    ]
+    return Outcome(
+        True,
+        findings,
+        len(ids),
+        len(ids),
+        {"max_gap_seconds": limit},
+        version=version,
+        not_checked=None if version == "1.0.0" else [],
+    )
 
 
 def from_evidence(
@@ -575,9 +733,10 @@ def from_evidence(
         # No media directory is not a finding about this run, so it adds no note: a note on every
         # run without media would push a pass sentence off the 400-character card.
         return Outcome(False, version=version, not_checked=None if old else [])
-    if read.problem:
-        return _not_applicable(read.problem, version)
     ids = [f"trial-{index:02d}" for index in range(1, planned + 1) if index in results]
+    if read.problem:
+        refused = _refuse_broken_media(manifest, read, ids, version)
+        return refused if refused is not None else _not_applicable(read.problem, version)
     # At 1.1.0 a file the reader refused at a cap was truncated, so it is ``not-present``.
     states = {
         f"trial-{i:02d}": "truncated"
@@ -651,6 +810,8 @@ def from_evidence(
     if old and skipped:
         notes.append(f"Not checked: recording of {listed_ids(skipped)} (no file to read).")
     outcome = judge(channels, limit, trials, version, truncation_once=old)
+    if outcome.applicable and not old:
+        _add_robot(outcome, read, limit, results, {t.id for t in trials}, version)
     if not outcome.applicable:
         return _not_applicable(
             "no recording file is present to judge",

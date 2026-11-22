@@ -5,13 +5,20 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing published stable release tag (vX.Y.Z) for a current-main Pages retry
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: verify-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   verify:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -24,31 +31,120 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --locked
+      - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync python tools/fetch_contract.py
       - run: mkdir -p artifacts && uv run --no-sync pytest -q --junitxml=artifacts/tests.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ !cancelled() }}
         with:
-          name: junit-report-${{ github.event.pull_request.head.sha || github.sha }}
+          name: junit-report-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: artifacts/tests.xml
           retention-days: 30
           if-no-files-found: error
-  release:
-    # semantic-release analyzes conventional commits, then tags v${version}
-    # and publishes a GitHub release. hatch-vcs reads that v* tag.
-    needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release.yml@v9.7.9
-  deploy-manual:
-    needs: release
-    if: needs.release.outputs.published == 'true'
+  version:
     permissions:
       contents: read
-      pages: write
-      id-token: write
+    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release-candidate.yml@v9.9.2
+    with:
+      replay-tag: ${{ inputs.release_tag || '' }}
+  manual:
+    needs: version
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.ref == 'refs/heads/main' &&
+       (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/docs.yml
     with:
-      release_tag: ${{ needs.release.outputs.git-tag }}
-      release_version: ${{ needs.release.outputs.version }}
+      source-commit: ${{ needs.version.outputs.commit }}
+      version: ${{ needs.version.outputs.semver-version }}
+      plan-run: ${{ needs.version.outputs.run-id }}
+      plan-attempt: ${{ needs.version.outputs.run-attempt }}
+  release:
+    needs: [verify, version, manual]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.version.outputs.version != '' &&
+      needs.version.outputs.git-tag == format('v{0}', needs.version.outputs.version) &&
+      needs.version.outputs.version == needs.manual.outputs.pages-version &&
+      needs.manual.outputs.pages-commit == github.sha &&
+      needs.manual.outputs.pages-run == github.run_id &&
+      needs.manual.outputs.pages-attempt == github.run_attempt &&
+      needs.manual.outputs.pages-name != '' &&
+      needs.manual.outputs.pages-tar-sha256 != ''
+    permissions:
+      contents: write
+    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release.yml@v9.9.2
+    with:
+      expected-version: ${{ needs.manual.outputs.pages-version }}
+      expected-commit: ${{ needs.manual.outputs.pages-commit }}
+  deploy:
+    needs: [manual, release]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      needs.manual.result == 'success' &&
+      needs.manual.outputs.pages-commit == github.sha &&
+      needs.manual.outputs.pages-run == github.run_id &&
+      needs.manual.outputs.pages-name != '' &&
+      needs.manual.outputs.pages-tar-sha256 != '' &&
+      ((github.event_name == 'push' && needs.release.result == 'success' &&
+        needs.release.outputs.published == 'true' &&
+        needs.release.outputs.version == needs.manual.outputs.pages-version &&
+        needs.release.outputs.commit == needs.manual.outputs.pages-commit) ||
+       (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' &&
+        needs.release.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SOURCE_SHA: ${{ needs.manual.outputs.pages-commit }}
+      MANUAL_VERSION: ${{ needs.manual.outputs.pages-version }}
+      RELEASE_TAG: ${{ needs.release.outputs.git-tag || inputs.release_tag }}
+      PRODUCER_ATTEMPT: ${{ needs.manual.outputs.pages-attempt }}
+      ARTIFACT_NAME: ${{ needs.manual.outputs.pages-name }}
+    steps:
+      - name: Require a published stable release at current main inside the deployment lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          [[ "$MANUAL_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$RELEASE_TAG" = "v$MANUAL_VERSION"
+          [[ "$PRODUCER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$PRODUCER_ATTEMPT" -le "$GITHUB_RUN_ATTEMPT"
+          test "$ARTIFACT_NAME" = "github-pages-$PRODUCER_ATTEMPT"
+          export GIT_TERMINAL_PROMPT=0
+          remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          ref="refs/tags/$RELEASE_TAG"
+          tags=$(timeout 30s git -c credential.helper= ls-remote --exit-code "$remote" "$ref" "$ref^{}")
+          mapfile -t refs <<< "$tags"
+          if [[ ${#refs[@]} == 2 ]]; then
+            [[ "${refs[0]%$'\t'*}" =~ ^[0-9a-f]{40}$ ]]
+            test "${refs[0]#*$'\t'}" = "$ref"
+            test "${refs[1]}" = "$SOURCE_SHA"$'\t'"$ref^{}"
+          else
+            test "${#refs[@]}" = 1
+            test "${refs[0]}" = "$SOURCE_SHA"$'\t'"$ref"
+          fi
+          curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" | \
+            jq -e --arg tag "$RELEASE_TAG" '
+              .tag_name == $tag and .draft == false and .prerelease == false and
+              (.published_at | type == "string" and length > 0)
+            ' >/dev/null
+          current=$(timeout 30s git -c credential.helper= ls-remote --exit-code "$remote" refs/heads/main)
+          test "$current" = "$SOURCE_SHA"$'\t'refs/heads/main
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+        id: deployment
+        with:
+          artifact_name: ${{ needs.manual.outputs.pages-name }}

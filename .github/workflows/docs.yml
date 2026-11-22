@@ -1,21 +1,36 @@
-name: Verify and publish documentation
+name: Verify documentation artifact
 on:
-  pull_request:
   workflow_call:
     inputs:
-      release_tag:
+      source-commit:
+        type: string
         required: true
+      version:
         type: string
-      release_version:
         required: true
+      plan-run:
         type: string
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing release tag (vX.Y.Z) to build and deploy
-        required: false
+        required: true
+      plan-attempt:
         type: string
-        default: ''
+        required: true
+    outputs:
+      pages-commit:
+        value: ${{ jobs.build.outputs.pages-commit }}
+      pages-version:
+        value: ${{ jobs.build.outputs.pages-version }}
+      pages-run:
+        value: ${{ jobs.build.outputs.pages-run }}
+      pages-attempt:
+        value: ${{ jobs.build.outputs.pages-attempt }}
+      pages-name:
+        value: ${{ jobs.build.outputs.pages-name }}
+      pages-tar-sha256:
+        value: ${{ jobs.build.outputs.pages-tar-sha256 }}
+      pages-id:
+        value: ${{ jobs.build.outputs.pages-id }}
+      pages-digest:
+        value: ${{ jobs.build.outputs.pages-digest }}
 permissions:
   contents: read
 jobs:
@@ -23,24 +38,36 @@ jobs:
     # Local adoption override: this initial docs scaffold uses locked Python
     # tooling; Docker/image/Task adoption is deferred (docs/verification.md).
     runs-on: ubuntu-24.04
+    outputs:
+      pages-commit: ${{ steps.package.outputs.commit }}
+      pages-version: ${{ steps.package.outputs.version }}
+      pages-run: ${{ steps.package.outputs.run }}
+      pages-attempt: ${{ steps.package.outputs.attempt }}
+      pages-name: ${{ steps.package.outputs.name }}
+      pages-tar-sha256: ${{ steps.package.outputs.sha256 }}
+      pages-id: ${{ steps.pages-artifact.outputs.artifact-id }}
+      pages-digest: ${{ steps.pages-artifact.outputs.artifact-digest }}
     env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      RELEASE_VERSION: ${{ inputs.release_version }}
+      SOURCE_SHA: ${{ inputs.source-commit }}
+      MANUAL_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ inputs.release_tag || github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          fetch-tags: true
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Require release tag to match the exact verified commit
-        if: inputs.release_tag != ''
-        shell: bash
+      - name: Bind the read-only release plan to the exact checkout and attempt
+        env:
+          EVENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAN_RUN: ${{ inputs.plan-run }}
+          PLAN_ATTEMPT: ${{ inputs.plan-attempt }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$GITHUB_SHA"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$EVENT_SHA"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$PLAN_RUN" = "$GITHUB_RUN_ID"
+          test "$PLAN_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+          test -n "$MANUAL_VERSION"
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9
         with:
           version: '0.13.6'
@@ -50,59 +77,140 @@ jobs:
       - run: uv run --no-sync python tools/docs.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: evaluator-documentation-review
+          name: evaluator-documentation-review-${{ github.run_attempt }}
           path: site/
           retention-days: 14
           if-no-files-found: error
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && inputs.release_tag != ''
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    concurrency:
-      group: github-pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Reject stale publication inside deployment lock
-        id: freshness
-        shell: bash
+      - name: Package Pages from the verified source
+        id: package
         run: |
           set -euo pipefail
-          current=$(timeout 30s git -c credential.helper= ls-remote --exit-code "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main)
-          [[ "$current" =~ ^([0-9a-f]{40})[[:space:]]refs/heads/main$ ]]
-          if [[ "${BASH_REMATCH[1]}" == "$GITHUB_SHA" ]]; then
-            echo 'current=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'current=false' >> "$GITHUB_OUTPUT"
-            echo 'Skipped stale source revision.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: steps.freshness.outputs.current == 'true'
-        with:
-          name: evaluator-documentation-review
-          path: site
-      - name: Check identity and package site
-        if: steps.freshness.outputs.current == 'true'
-        run: |
           python3 - <<'PY'
           import json, os
-          identity = json.load(open('site/build.json'))
-          assert identity['source_commit'] == os.environ['GITHUB_SHA']
-          assert identity['source_dirty'] is False
+          with open('site/build.json') as f:
+              identity = json.load(f)
+          expected = {
+              'source_commit': os.environ['SOURCE_SHA'],
+              'source_dirty': False,
+              'version': os.environ['MANUAL_VERSION'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          if any(identity.get(key) != value for key, value in expected.items()) or identity['source_dirty'] is not False:
+              raise SystemExit('Pages build does not match the exact source, version, run and attempt')
           PY
           tar --dereference --hard-dereference -C site -cf "$RUNNER_TEMP/artifact.tar" .
+          digest=$(sha256sum "$RUNNER_TEMP/artifact.tar")
+          {
+            printf 'attempt=%s\nname=github-pages-%s\n' "$GITHUB_RUN_ATTEMPT" "$GITHUB_RUN_ATTEMPT"
+            printf 'commit=%s\nversion=%s\nrun=%s\n' "$SOURCE_SHA" "$MANUAL_VERSION" "$GITHUB_RUN_ID"
+            printf 'sha256=%s\n' "${digest%% *}"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: steps.freshness.outputs.current == 'true'
+        id: pages-artifact
         with:
-          name: github-pages
+          name: ${{ steps.package.outputs.name }}
           path: ${{ runner.temp }}/artifact.tar
           retention-days: 1
           if-no-files-found: error
-      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
-        if: steps.freshness.outputs.current == 'true'
-        id: deployment
+  verify-pages-artifact:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the unique Pages artifact in this run
+        env:
+          ARTIFACT_ID: ${{ needs.build.outputs.pages-id }}
+          ARTIFACT_NAME: ${{ needs.build.outputs.pages-name }}
+          ARTIFACT_DIGEST: ${{ needs.build.outputs.pages-digest }}
+          PRODUCER_ATTEMPT: ${{ needs.build.outputs.pages-attempt }}
+          SOURCE_SHA: ${{ inputs.source-commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time, urllib.error, urllib.parse, urllib.request
+
+          artifact_id = os.environ['ARTIFACT_ID']
+          name = os.environ['ARTIFACT_NAME']
+          digest = os.environ['ARTIFACT_DIGEST']
+          attempt = os.environ['PRODUCER_ATTEMPT']
+          source = os.environ['SOURCE_SHA']
+          run_id = int(os.environ['GITHUB_RUN_ID'])
+          if (not re.fullmatch(r'[1-9]\d*', artifact_id)
+                  or not re.fullmatch(r'[1-9]\d*', attempt)
+                  or int(attempt) > int(os.environ['GITHUB_RUN_ATTEMPT'])
+                  or name != f'github-pages-{attempt}'
+                  or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                  or not re.fullmatch(r'[0-9a-f]{40}', source)):
+              raise SystemExit('Invalid Pages producer identity')
+          query = urllib.parse.urlencode({'name': name, 'per_page': 100})
+          repo = os.environ['GITHUB_REPOSITORY']
+          url = f'https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?{query}'
+          request = urllib.request.Request(url, headers={
+              'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+              'Accept': 'application/vnd.github+json',
+          })
+          for delay in (0, 1, 2, 4, 8, 15):
+              time.sleep(delay)
+              try:
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      result = json.load(response)
+              except urllib.error.HTTPError as exc:
+                  if exc.code in {404, 429, 500, 502, 503, 504}:
+                      continue
+                  raise
+              if result['total_count'] == 0 and result['artifacts'] == []:
+                  continue
+              if result['total_count'] != 1 or len(result['artifacts']) != 1:
+                  raise SystemExit('Expected exactly one Pages artifact with the producer name')
+              artifact = result['artifacts'][0]
+              workflow = artifact.get('workflow_run') or {}
+              if (artifact.get('id') != int(artifact_id) or artifact.get('name') != name
+                      or artifact.get('digest') != f'sha256:{digest}'
+                      or artifact.get('expired') is not False or not artifact.get('size_in_bytes')
+                      or workflow.get('id') != run_id or workflow.get('head_sha') != source):
+                  raise SystemExit('Pages artifact metadata does not match its producer')
+              print(f'Validated {name} (artifact {artifact_id}) from attempt {attempt} of run {run_id}')
+              break
+          else:
+              raise SystemExit('The Pages artifact did not become visible in this run')
+          PY
+      # No API token input: this uses the workflow artifact backend, like deploy-pages.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.build.outputs.pages-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/pages-readback
+      - name: Verify the exact deployment tar and source identity
+        env:
+          EXPECTED_DIGEST: ${{ needs.build.outputs.pages-tar-sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.build.outputs.pages-attempt }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-commit }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, tarfile
+
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pages-readback' / 'artifact.tar'
+          with path.open('rb') as f:
+              if hashlib.file_digest(f, 'sha256').hexdigest() != os.environ['EXPECTED_DIGEST']:
+                  raise SystemExit('Downloaded Pages tar differs from producer')
+          with tarfile.open(path) as tar:
+              member = tar.getmember('./build.json')
+              if not member.isfile():
+                  raise SystemExit('Pages build identity is not a regular file')
+              with tar.extractfile(member) as f:
+                  metadata = json.load(f)
+          expected = {
+              'source_commit': os.environ['SOURCE_SHA'],
+              'source_dirty': False,
+              'version': os.environ['MANUAL_VERSION'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['PRODUCER_ATTEMPT'],
+          }
+          if any(metadata.get(key) != value for key, value in expected.items()) or metadata['source_dirty'] is not False:
+              raise SystemExit('Downloaded Pages tar identifies the wrong source, version, run or attempt')
+          print(f"Verified Pages tar {metadata['version']} for exact source {metadata['source_commit']}")
+          PY

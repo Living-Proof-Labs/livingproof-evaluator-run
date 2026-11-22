@@ -16,18 +16,25 @@ builds with Zensical, and checks rendered links, fragments, brand inclusion,
 and absence of the stock indigo palette. `site/build.json` records the source
 commit and whether the checkout had uncommitted changes.
 
-The workflow uses the same build command. Pull requests build only; their
-`evaluator-documentation-review` artifact is retained for 14 days. Main pushes
-and manual runs on main can deploy the checked site to GitHub Pages. Other
-branches cannot deploy. The live manual is separate from expiring artifacts.
+Pull requests use the same builder to verify a read-only version plan and retain
+`evaluator-documentation-review-<attempt>` for 14 days. They cannot tag,
+release or deploy. Before a normal stable release, the workflow verifies the
+application and builds and verifies the versioned Pages tar for the exact
+candidate commit. After publication, it checks the stable release and current
+`main` inside the deployment lock and deploys that same tar. A main run with
+no release due does not deploy.
+
+To retry a Pages delivery after publication, use **Verify → Run workflow** on
+`main` with the existing stable tag (`vX.Y.Z`) that points to current `main`.
+This read-only release check rebuilds and verifies the same versioned manual
+without invoking the release writer. This does not redeploy older commits or
+unpublished tags.
 
 ## Publication prerequisites
 
 A maintainer must enable GitHub Pages with GitHub Actions as the source, ensure
-Actions and the `github-pages` environment permit the deployment, and review this
-PR before merging. This workflow does not change repository settings. Pages
-permissions are scoped to the deploy job. No merge or deployment is claimed by
-this documentation change.
+Actions and the `github-pages` environment permit the deployment. The workflow
+does not change repository settings; Pages permissions are scoped to the deploy job.
 
 The configured destination is
 `https://docs.livingprooflabs.com/livingproof-evaluator-run/`, subject to the

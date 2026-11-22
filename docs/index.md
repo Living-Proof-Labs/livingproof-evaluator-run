@@ -177,8 +177,14 @@ generated cases.
 **Where the recordings come from.** livingproof-sim-mujoco's `media` module writes
 `mcap/trial-NN.mcap` for every trial and `media.json`
 (`livingproof-hallway-media/2.0.0`: `trials[].index`, `observation_sha256` and
-`mcap.{path,bytes,sha256}`) in capability-verifier's optional `media` job, which uploads them as
-the artifact `<prefix>mcap-<configuration>`. The evidence manifest records neither, so the
+`mcap.{path,bytes,sha256}`; 2.1.0 and 2.2.0 are read the same way) in capability-verifier's
+optional `media` job, which uploads them as
+the artifact `<prefix>mcap-<configuration>`. From `media.json` 2.2.0 each trial also lists a
+`robot_mcap` (`mcap/trial-NN.robot.mcap`, what the robot adapter published). The check judges it
+too for structure, timestamps, the gap limit and its size and sha256, but requires no channel in
+it. A robot file that is not listed, is missing, or is not a usable MCAP is
+`media-file-mismatch`, each with its own summary, and a trial with a finding in either file
+fails. The evidence manifest records neither, so the
 evaluator takes the artifact's directory as `--media DIR`. The runner re-runs each trial for its
 recording and keeps the file only if the observation hashes to the evidence's digest, which is why
 `observation_sha256` is the link back to `trials.results[].sha256`.
@@ -194,10 +200,11 @@ recording and keeps the file only if the observation hashes to the evidence's di
 **The gap limit.** It comes from the evidence and from nowhere else. A gap equal to the limit is
 not a finding; only a larger one is. When the check is applicable its `limits.max_gap_seconds` is
 exactly the evidence's value. A value that is not a finite number above zero is not used. With no
-usable limit the check is not applicable even when media is present, and the summary says that
-it declares none and there is no default: the check never assumes one. No plan declares a limit
-today. The `0.1` s in the contract's examples is a proposal that has not been approved, and
-nothing here uses it.
+usable limit the check is not applicable even when media is present, and the summary says that it
+declares none and there is no default: the check never assumes one. All ten locks in
+livingproof-verification (the `lpv` locks) declare `plan.recording.max_gap_seconds` as `0.05` s, so
+a run on one of them has a limit; a run whose evidence declares none does not. The `0.1` s in the
+contract's examples is a proposal that has not been approved, and nothing here uses it.
 
 | Category | When |
 | --- | --- |
@@ -218,6 +225,24 @@ everything was judged:
 | --- | --- |
 | `not-present` | `media.json` lists the trial's recording and it is missing, truncated or empty. `completeness` reports it |
 | `not-recorded` | nothing was recorded for the trial: it is not in `media.json` |
+
+**A broken media file is refused, not skipped.** The check reads `livingproof-hallway-media`
+2.0.0, 2.1.0 and 2.2.0 and nothing else. If the media directory has a `media.json`, the check fails
+when that file cannot be read as a JSON object, has no `format` that is text, names a format this
+check does not know (an unknown minor such as 2.3.0, an unknown major such as 3.0.0, or any other
+string), or has a known format but no trials: `trials` missing, not a list, or an empty list, since
+zero trials is broken evidence. Every trial gets a `media-file-mismatch` finding that says which of
+these it is, names the format when there is one and lists the versions this check reads, so a
+recording nobody judged is never reported as a pass. Reading a new version is an explicit, tested
+addition. The result is applicable and carries `limits` as usual.
+
+With **no declared gap limit** the contract cannot carry a failure (a not applicable result has no
+findings, and an applicable one needs `limits`, which the check never invents), so the evaluator
+**refuses**: it exits with status 2, prints the cause on stderr
+(`livingproof-evaluator-run: media is refused: ...; no result written`) and writes no result, as
+for a malformed request. A known version with a sound body and no declared gap limit is not
+applicable, not refused. A media directory with no `media.json` at all is also not applicable, as
+it was. At recording 1.0.0, which predates this rule, a broken `media.json` stays not applicable.
 
 With nothing judged, or no media, the check is not applicable: it reports no percentage and no
 `limits`, and `not_checked` is empty. A run with no media passes as it did before this check, and
@@ -265,20 +290,25 @@ hashed in full against `media.json`; the limits do not cap its size on disk.
 
 **What runs today, and what waits.** Run by hand with `--media` on a downloaded media artifact,
 the check works as above once the evidence declares a gap limit. In the capability-verifier
-workflow it cannot: the `run-integrity` job needs only `plan` and `evidence`, so it is not given
-the recordings or `media.json` (capability-verifier#156) and the check is not applicable on every
-run. Until something declares `plan.recording.max_gap_seconds` it is not applicable even then. This includes a recording the reader refused at a size limit: with no limit declared nothing reports it, because an applicable result must carry `limits` (the contract's schema) and none exists. Declaring the limit closes this.
+workflow, `--media` is now passed to the `run-integrity` job whenever the media job produced a
+`media.json` and the pinned evaluator takes the flag (v1.4.0 or later); without media, or with an
+older pinned evaluator, the check is not applicable. The `lpv` locks declare the limit (`0.05` s),
+so with media the check applies there. Evidence that declares none is not applicable, and that
+includes a recording the reader refused at a size limit: with no limit nothing reports it, because
+an applicable result must carry `limits` (the contract's schema) and none exists. Declaring the
+limit closes this.
 The check is tested against a real recording from verification run 43402628666 and synthetic
 ones written as the runner writes them; it has not run inside the workflow. On a
 `livingproof-evaluator-request` the facts come from `integrity.evidence["recording"]` as the
 contract defines them, and only recordings the request's trials report as `present` are judged;
 the tests run the contract's reference rules against ours on 600 generated cases.
 
-**Two recordings per trial.** livingproof-sim-mujoco#108 would split the recording into a
-robot-reported and a ground-truth file and version `media.json`. This check does not implement
-that. The rules (`recording.judge`) work on facts and know nothing of where they were read, and
-the reader (`mcap_reader`) knows nothing of the rules, so a second file is another reading step,
-and a new `media.json` format is read beside the 2.0.0 one rather than changing a rule.
+**Two recordings per trial.** livingproof-sim-mujoco#108 split the recording into a ground-truth
+file and a robot-reported file and versioned `media.json` (2.2.0). This check reads both: the
+rules (`recording.judge`) work on facts and know nothing of where they were read, and the reader
+(`mcap_reader`) knows nothing of the rules, so the robot file is another reading step
+(`recording._add_robot`) and the new `media.json` formats are read beside 2.0.0 rather than
+changing a rule.
 
 Start with this scope and the [verification limits](verification.md). To propose
 behavior, use
