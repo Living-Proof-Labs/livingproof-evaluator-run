@@ -44,7 +44,7 @@ jobs:
   version:
     permissions:
       contents: read
-    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release-candidate.yml@v9.9.2
+    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release-candidate.yml@v9.9.3
     with:
       replay-tag: ${{ inputs.release_tag || '' }}
   manual:
@@ -76,7 +76,7 @@ jobs:
       needs.manual.outputs.pages-tar-sha256 != ''
     permissions:
       contents: write
-    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release.yml@v9.9.2
+    uses: Living-Proof-Labs/collaboration-guidelines/.github/workflows/semantic-release.yml@v9.9.3
     with:
       expected-version: ${{ needs.manual.outputs.pages-version }}
       expected-commit: ${{ needs.manual.outputs.pages-commit }}
