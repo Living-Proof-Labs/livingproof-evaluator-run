@@ -1,9 +1,36 @@
-name: Verify and publish documentation
+name: Verify documentation artifact
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source-commit:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      plan-run:
+        type: string
+        required: true
+      plan-attempt:
+        type: string
+        required: true
+    outputs:
+      pages-commit:
+        value: ${{ jobs.build.outputs.pages-commit }}
+      pages-version:
+        value: ${{ jobs.build.outputs.pages-version }}
+      pages-run:
+        value: ${{ jobs.build.outputs.pages-run }}
+      pages-attempt:
+        value: ${{ jobs.build.outputs.pages-attempt }}
+      pages-name:
+        value: ${{ jobs.build.outputs.pages-name }}
+      pages-tar-sha256:
+        value: ${{ jobs.build.outputs.pages-tar-sha256 }}
+      pages-id:
+        value: ${{ jobs.build.outputs.pages-id }}
+      pages-digest:
+        value: ${{ jobs.build.outputs.pages-digest }}
 permissions:
   contents: read
 jobs:
@@ -12,16 +39,35 @@ jobs:
     # tooling; Docker/image/Task adoption is deferred (docs/verification.md).
     runs-on: ubuntu-24.04
     outputs:
+      pages-commit: ${{ steps.package.outputs.commit }}
+      pages-version: ${{ steps.package.outputs.version }}
+      pages-run: ${{ steps.package.outputs.run }}
       pages-attempt: ${{ steps.package.outputs.attempt }}
       pages-name: ${{ steps.package.outputs.name }}
       pages-tar-sha256: ${{ steps.package.outputs.sha256 }}
       pages-id: ${{ steps.pages-artifact.outputs.artifact-id }}
       pages-digest: ${{ steps.pages-artifact.outputs.artifact-digest }}
+    env:
+      SOURCE_SHA: ${{ inputs.source-commit }}
+      MANUAL_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Bind the read-only release plan to the exact checkout and attempt
+        env:
+          EVENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAN_RUN: ${{ inputs.plan-run }}
+          PLAN_ATTEMPT: ${{ inputs.plan-attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$EVENT_SHA"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$PLAN_RUN" = "$GITHUB_RUN_ID"
+          test "$PLAN_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+          test -n "$MANUAL_VERSION"
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9
         with:
           version: '0.13.6'
@@ -37,21 +83,27 @@ jobs:
           if-no-files-found: error
       - name: Package Pages from the verified source
         id: package
-        env:
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, os
           with open('site/build.json') as f:
               identity = json.load(f)
-          if identity.get('source_commit') != os.environ['SOURCE_SHA'] or identity.get('source_dirty') is not False:
-              raise SystemExit('Pages build does not identify the exact clean source commit')
+          expected = {
+              'source_commit': os.environ['SOURCE_SHA'],
+              'source_dirty': False,
+              'version': os.environ['MANUAL_VERSION'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          if any(identity.get(key) != value for key, value in expected.items()) or identity['source_dirty'] is not False:
+              raise SystemExit('Pages build does not match the exact source, version, run and attempt')
           PY
           tar --dereference --hard-dereference -C site -cf "$RUNNER_TEMP/artifact.tar" .
           digest=$(sha256sum "$RUNNER_TEMP/artifact.tar")
           {
             printf 'attempt=%s\nname=github-pages-%s\n' "$GITHUB_RUN_ATTEMPT" "$GITHUB_RUN_ATTEMPT"
+            printf 'commit=%s\nversion=%s\nrun=%s\n' "$SOURCE_SHA" "$MANUAL_VERSION" "$GITHUB_RUN_ID"
             printf 'sha256=%s\n' "${digest%% *}"
           } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -74,7 +126,7 @@ jobs:
           ARTIFACT_NAME: ${{ needs.build.outputs.pages-name }}
           ARTIFACT_DIGEST: ${{ needs.build.outputs.pages-digest }}
           PRODUCER_ATTEMPT: ${{ needs.build.outputs.pages-attempt }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_SHA: ${{ inputs.source-commit }}
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
@@ -134,7 +186,9 @@ jobs:
       - name: Verify the exact deployment tar and source identity
         env:
           EXPECTED_DIGEST: ${{ needs.build.outputs.pages-tar-sha256 }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PRODUCER_ATTEMPT: ${{ needs.build.outputs.pages-attempt }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-commit }}
         run: |
           python3 - <<'PY'
           import hashlib, json, os, pathlib, tarfile
@@ -149,39 +203,14 @@ jobs:
                   raise SystemExit('Pages build identity is not a regular file')
               with tar.extractfile(member) as f:
                   metadata = json.load(f)
-          if metadata.get('source_commit') != os.environ['SOURCE_SHA'] or metadata.get('source_dirty') is not False:
-              raise SystemExit('Downloaded Pages tar identifies the wrong source')
-          print(f"Verified Pages tar for exact source {metadata['source_commit']}")
+          expected = {
+              'source_commit': os.environ['SOURCE_SHA'],
+              'source_dirty': False,
+              'version': os.environ['MANUAL_VERSION'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['PRODUCER_ATTEMPT'],
+          }
+          if any(metadata.get(key) != value for key, value in expected.items()) or metadata['source_dirty'] is not False:
+              raise SystemExit('Downloaded Pages tar identifies the wrong source, version, run or attempt')
+          print(f"Verified Pages tar {metadata['version']} for exact source {metadata['source_commit']}")
           PY
-  deploy:
-    needs: [build, verify-pages-artifact]
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    concurrency:
-      group: github-pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Reject stale publication inside deployment lock
-        id: freshness
-        shell: bash
-        run: |
-          set -euo pipefail
-          current=$(timeout 30s git -c credential.helper= ls-remote --exit-code "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main)
-          [[ "$current" =~ ^([0-9a-f]{40})[[:space:]]refs/heads/main$ ]]
-          if [[ "${BASH_REMATCH[1]}" == "$GITHUB_SHA" ]]; then
-            echo 'current=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'current=false' >> "$GITHUB_OUTPUT"
-            echo 'Skipped stale source revision.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
-        if: steps.freshness.outputs.current == 'true'
-        id: deployment
-        with:
-          artifact_name: ${{ needs.build.outputs.pages-name }}

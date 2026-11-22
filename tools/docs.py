@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -48,23 +49,32 @@ if hashlib.sha256(brand).hexdigest() != lock["sha256"]:
 (stage / "assets/brand.css").write_bytes(brand)
 sha = git("rev-parse", "HEAD")
 identity = {"source_commit": sha, "source_dirty": bool(git("status", "--porcelain")), "brand": lock}
+version = os.environ.get("MANUAL_VERSION", "development")
+if version != "development" and not re.fullmatch(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?",
+    version,
+):
+    raise SystemExit("Invalid manual build version")
+identity["version"] = version
 run_id = os.environ.get("GITHUB_RUN_ID")
 if run_id:
     identity["workflow_run"] = f"{REPO}/actions/runs/{run_id}"
+    identity["run_id"] = run_id
+    identity["run_attempt"] = os.environ["GITHUB_RUN_ATTEMPT"]
 (stage / "version.md").write_text(f"""# Version and source
 
-Docs: development · [{sha[:7]}]({REPO}/tree/{sha})
+Docs: {version} · [{sha[:7]}]({REPO}/tree/{sha})
 
 Full source commit: `{sha}`. Uncommitted source changes: `{identity["source_dirty"]}`.
-This manual describes the initial repository scaffold, not a released evaluator.
-The documentation build package's `0.0.0` is not a product release.
+The deployment workflow publishes only manuals bound to a stable release.
 
 [Source tree]({REPO}/tree/{sha}) ·
-[Verification workflow]({REPO}/actions/workflows/docs.yml) ·
+[Verification workflow]({REPO}/actions/workflows/verify.yml) ·
 [Machine-readable build identity](build.json)
 
-Only a moving development manual is planned. Historical rendered manuals are not
-maintained; consult [source tags]({REPO}/tags) and Git history for older revisions.
+The live manual tracks the newest deployment, not a historical archive.
+Consult [source tags]({REPO}/tags) and Git history for older revisions.
 
 Brand: guidelines {lock["version"]} at `{lock["commit"]}`, verified by SHA-256.
 """)
