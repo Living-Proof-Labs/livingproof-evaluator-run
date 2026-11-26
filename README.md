@@ -10,6 +10,8 @@ The first slice is one check, `completeness` 1.1.0: planned trial count versus o
 python -m livingproof_evaluator_run evidence/manifest.json --out result.json
 ```
 
+The implementation descriptor is [`livingproof-evaluator.json`](livingproof-evaluator.json). A loader pins `Living-Proof-Labs/livingproof-evaluator-run@<tag>/livingproof-evaluator.json`.
+
 `pins` 1.1.0 compares the pins the verification lock declares with what the run recorded: world, configuration and runner today. Specs and verifier are listed in `not_checked` until the evidence records them. See [the checks](docs/index.md#checks).
 
 `plan-conformance` 1.1.0 checks that the trials that ran are the trials that were planned: the plan, `trials.count`, the number of `trials.results` entries and the lock's plan agree on the trial count and the command speed, and the indexes are exactly 1 to N with each path `trials/trial-NN.json` for its own index. A run whose preconditions are unmet is not applicable. See [the checks](docs/index.md#checks).

@@ -1,0 +1,9 @@
+{
+  "repository": "Living-Proof-Labs/livingproof-evaluator",
+  "tag": "v1.9.0",
+  "commit": "cbd05d59e2badc1a53cbb39ca0a15ec9070baa24",
+  "files": {
+    "schema/implementation.schema.json": "d8adc623728a710865b8041d5a0fa2d635013954b0da03b976ab0afe4c3dcfc3",
+    "schema/defs.schema.json": "8ad76e45fb5c7390c787537170e4c581e75de0a14ee3287f3f877656892e69b7"
+  }
+}
