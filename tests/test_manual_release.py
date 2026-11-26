@@ -188,6 +188,34 @@ def test_drifted_guidelines_workflow_pin_is_rejected():
         assert guidelines_pin_drift(uses, required) == reason
 
 
+def test_release_read_is_authenticated_bounded_and_fails_closed():
+    """The deploy release read is authenticated, bounded, and fails closed."""
+    deploy = workflow("verify.yml")["jobs"]["deploy"]
+    assert deploy["permissions"] == {"pages": "write", "id-token": "write"}
+    step = verify_step(
+        deploy,
+        "Require a published stable release at current main inside the deployment lock",
+    )
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    text = step["run"]
+    script = (ROOT / "scripts" / "read-release.sh").read_text()
+    assert script in text
+    assert "bash scripts/read-release.sh" in text
+    assert "Authorization: Bearer $GH_TOKEN" in text
+    assert "sleep 5" in text
+    assert "-le 3" in text
+    retry = next(
+        line for line in text.splitlines() if "403" in line and "429" in line and "5xx" in line
+    )
+    assert "404" not in retry
+    assert ".tag_name == $tag and .draft == false and .prerelease == false" in text
+    assert '(.published_at | type == "string" and length > 0)' in text
+    assert "x-ratelimit-remaining" in text
+    assert "release read failed: HTTP" in text
+    assert "set +x" in script
+    assert "set -x" not in script
+
+
 def test_adopted_guidelines_workflows_use_that_published_tag():
     tag = adopted_guidelines_tag()
     found = guidelines_workflow_uses()
