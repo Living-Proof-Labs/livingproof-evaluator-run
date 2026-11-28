@@ -600,12 +600,9 @@ def _write_result(
             return " ".join([*pass_parts, *extra])
 
         tail = [*stop, *kept]
-        dropped_notes = []
         while stop and len(packed(parts, tail)) > 400:
-            dropped_notes.insert(0, stop.pop())
+            stop.pop()
             tail = [*stop, *kept, "More notes."]
-        if dropped_notes:
-            descriptor["details_copy"] = " ".join(dropped_notes)
         while parts and len(packed(parts, tail)) > 400:
             parts.pop()
         descriptor["success_copy"] = _clip(packed(parts, tail), 400)
