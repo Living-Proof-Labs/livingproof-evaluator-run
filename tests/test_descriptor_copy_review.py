@@ -54,13 +54,19 @@ def test_a_real_lock_run_with_media_but_no_gap_limit_keeps_the_pass_sentences(
     assert TERMINATION_SENTENCE in copy
     document = json.loads(out.read_text(encoding="utf-8"))
     assert "max_gap_seconds" in copy and "no default" in copy
-    # Stop-reasons moves to the details when the card is tight, so the pass sentences
-    # and not-checked notes stay without losing the full stop-reasons note.
+    # The stop-reasons note still leaves the 400-character success_copy when
+    # that summary is tight. details_copy is the card the report shows, and holds
+    # every check sentence plus the full stop-reasons note.
     assert "Stop reasons:" not in copy
-    assert document["descriptor"].get("details_copy") == (
+    details = document["descriptor"]["details_copy"]
+    assert PINS_SENTENCE in details
+    assert PLAN_SENTENCE in details
+    assert TERMINATION_SENTENCE in details
+    assert (
         "Stop reasons: the default allowed list, which excludes simulation-broken "
         "(the plan declares none)."
-    )
+    ) in details
+    assert len(details) <= 1000
     termination = next(c for c in document["integrity"]["checks"] if c["id"] == "termination")
     assert "notes" not in termination
     assert "More notes." in copy
@@ -71,9 +77,11 @@ def test_a_real_lock_run_with_media_but_no_gap_limit_keeps_the_pass_sentences(
 
 
 def test_a_real_lock_run_without_media_still_carries_the_stop_reasons_note(tmp_path: Path) -> None:
-    """When the card is not tight the default stop-reasons note stays on it. The media-but-no
-    gap-limit path drops that note first; this is the contrasting case from PR 16, already
-    367 characters or less on a real lock, which must keep the note."""
+    """When the 400-character success_copy is not tight the default stop-reasons
+    note stays on it. The media-but-no gap-limit path drops that note from
+    success_copy first; this is the contrasting case from PR 16, already 367
+    characters or less on a real lock, which must keep the note on success_copy.
+    details_copy also carries the check sentences and the stop-reasons note."""
     folder = tmp_path / "evidence"
     shutil.copytree(PINS_GOOD, folder)
     out = tmp_path / "result.json"
@@ -85,5 +93,9 @@ def test_a_real_lock_run_without_media_still_carries_the_stop_reasons_note(tmp_p
     assert TERMINATION_SENTENCE in copy
     assert PINS_SENTENCE in copy
     assert "More notes." not in copy
-    assert "details_copy" not in document["descriptor"]
+    details = document["descriptor"]["details_copy"]
+    assert TERMINATION_SENTENCE in details
+    assert PINS_SENTENCE in details
+    assert "Stop reasons:" in details
+    assert len(details) <= 1000
     assert base._validate(document) == []

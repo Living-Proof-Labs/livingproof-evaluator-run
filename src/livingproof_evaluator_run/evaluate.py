@@ -579,15 +579,19 @@ def _write_result(
         )
         descriptor["findings"] = []
     elif success:
-        # The copy is at most 400 characters. "Stop reasons" notes are dropped first when the
-        # card is tight, and preserved in details with a marker on the card, so a
-        # "Not checked" note can share it with the pass sentences. A
-        # sentence that says a check passed is then dropped last-check-first, before a note
-        # about what was not checked is ever cut.
-        parts = [report.success_copy for report in reports if report.success_copy]
+        # success_copy is at most 400 characters. "Stop reasons" notes are dropped
+        # first when that summary is tight, then a check-passed sentence is dropped
+        # last-check-first, before a "Not checked" note is ever cut. The report
+        # shows details_copy whenever it is present, and only falls back to
+        # success_copy when details_copy is empty (livingproof-evaluator-run#70),
+        # so the full card text (a sentence for every check, plus the notes,
+        # including stop reasons) is written to details_copy, up to 1000
+        # characters, after the 400-character summary is packed.
+        all_parts = [report.success_copy for report in reports if report.success_copy]
         raw_notes = [note for report in reports for note in report.notes]
         if unchecked:
             raw_notes.append(f"Not checked: {', '.join(unchecked)}.")
+        parts = list(all_parts)
         stop, kept = [], []
         for note in raw_notes:
             (stop if note.startswith("Stop reasons:") else kept).append(note)
@@ -605,6 +609,9 @@ def _write_result(
         while parts and len(packed(parts, tail)) > 400:
             parts.pop()
         descriptor["success_copy"] = _clip(packed(parts, tail), 400)
+        details = " ".join(part for part in (*all_parts, *raw_notes) if part)
+        if details:
+            descriptor["details_copy"] = _clip(details, DESCRIPTOR_LIMITS["details_copy"])
     else:
         kept = all_shown[: MAX_FINDINGS - 1] if overflow_note else shown
         problems = " ".join(item["text"] for item in kept)
